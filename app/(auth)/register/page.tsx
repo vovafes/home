@@ -47,7 +47,7 @@ export default function RegisterPage() {
     if (signUpError) {
       setError(signUpError.message === 'User already registered'
         ? 'Этот email уже зарегистрирован'
-        : 'Ошибка регистрации. Попробуйте ещё раз.'
+        : signUpError.message
       )
       setLoading(false)
       return
