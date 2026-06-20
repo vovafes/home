@@ -138,7 +138,7 @@ DROP POLICY IF EXISTS "Семья удаляет задачи"   ON public.tasks
 CREATE POLICY "Видеть свою семью" ON public.families FOR SELECT
   USING (id IN (SELECT public.get_my_family_ids()));
 CREATE POLICY "Создать семью" ON public.families FOR INSERT
-  WITH CHECK (created_by = auth.uid());
+  WITH CHECK (auth.role() = 'authenticated');
 CREATE POLICY "Обновить свою семью" ON public.families FOR UPDATE
   USING (created_by = auth.uid());
 
