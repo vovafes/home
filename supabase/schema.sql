@@ -222,13 +222,9 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ─── Дефолтные магазины ──────────────────────────────────────
-INSERT INTO public.stores (name, icon, color, order_index) VALUES
-  ('Продукты',         '🛒', '#16A34A', 0),
-  ('Бытовая химия',    '🧴', '#0284C7', 1),
-  ('Товары для дома',  '🏠', '#7C3AED', 2),
-  ('Аптека',           '💊', '#DC2626', 3),
-  ('Зоотовары',        '🐾', '#D97706', 4)
-ON CONFLICT DO NOTHING;
+-- Магазины теперь привязаны к семье (family_id NOT NULL), поэтому
+-- глобальные seed-данные здесь не нужны. Магазины создаются семьёй
+-- через интерфейс приложения.
 
 -- ─── Storage bucket для фото ──────────────────────────────────
 INSERT INTO storage.buckets (id, name, public, file_size_limit)

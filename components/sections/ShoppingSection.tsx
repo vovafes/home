@@ -45,6 +45,12 @@ export default function ShoppingSection({ color }: { color?: string }) {
   useEffect(() => {
     loadStores()
     loadCounts()
+    const channel = supabase
+      .channel('stores')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stores' }, () => { loadStores(); loadCounts() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items' }, loadCounts)
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
   }, [loadStores, loadCounts])
 
   const addStore = async () => {

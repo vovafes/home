@@ -53,7 +53,7 @@ export default function RegisterPage() {
       return
     }
 
-    router.push('/shopping')
+    router.push('/setup')
     router.refresh()
   }
 
