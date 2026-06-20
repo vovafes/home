@@ -100,107 +100,109 @@ ALTER TABLE public.shopping_items  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.calendar_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tasks           ENABLE ROW LEVEL SECURITY;
 
+-- Вспомогательная функция: возвращает family_id текущего пользователя.
+-- SECURITY DEFINER обходит RLS при внутреннем запросе → нет рекурсии.
+CREATE OR REPLACE FUNCTION public.get_my_family_ids()
+RETURNS SETOF UUID LANGUAGE SQL SECURITY DEFINER STABLE AS $$
+  SELECT family_id FROM public.family_members WHERE user_id = auth.uid()
+$$;
+
+-- Сброс политик перед созданием (безопасно при повторном запуске)
+DROP POLICY IF EXISTS "Видеть свою семью"         ON public.families;
+DROP POLICY IF EXISTS "Создать семью"              ON public.families;
+DROP POLICY IF EXISTS "Обновить свою семью"        ON public.families;
+DROP POLICY IF EXISTS "Видеть участников семьи"    ON public.family_members;
+DROP POLICY IF EXISTS "Вступить в семью"           ON public.family_members;
+DROP POLICY IF EXISTS "Покинуть семью"             ON public.family_members;
+DROP POLICY IF EXISTS "Видеть профили своей семьи" ON public.profiles;
+DROP POLICY IF EXISTS "Пользователь создаёт свой профиль" ON public.profiles;
+DROP POLICY IF EXISTS "Пользователь обновляет свой профиль" ON public.profiles;
+DROP POLICY IF EXISTS "Семья видит магазины"   ON public.stores;
+DROP POLICY IF EXISTS "Семья создаёт магазины" ON public.stores;
+DROP POLICY IF EXISTS "Семья изменяет магазины" ON public.stores;
+DROP POLICY IF EXISTS "Семья удаляет магазины"  ON public.stores;
+DROP POLICY IF EXISTS "Семья видит товары"    ON public.shopping_items;
+DROP POLICY IF EXISTS "Семья добавляет товары" ON public.shopping_items;
+DROP POLICY IF EXISTS "Семья изменяет товары"  ON public.shopping_items;
+DROP POLICY IF EXISTS "Семья удаляет товары"   ON public.shopping_items;
+DROP POLICY IF EXISTS "Семья видит события"    ON public.calendar_events;
+DROP POLICY IF EXISTS "Семья создаёт события"  ON public.calendar_events;
+DROP POLICY IF EXISTS "Семья изменяет события" ON public.calendar_events;
+DROP POLICY IF EXISTS "Семья удаляет события"  ON public.calendar_events;
+DROP POLICY IF EXISTS "Семья видит задачи"     ON public.tasks;
+DROP POLICY IF EXISTS "Семья создаёт задачи"   ON public.tasks;
+DROP POLICY IF EXISTS "Семья изменяет задачи"  ON public.tasks;
+DROP POLICY IF EXISTS "Семья удаляет задачи"   ON public.tasks;
+
 -- Families
-CREATE POLICY "Видеть свою семью"
-  ON public.families FOR SELECT
-  USING (id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
-CREATE POLICY "Создать семью"
-  ON public.families FOR INSERT WITH CHECK (created_by = auth.uid());
-CREATE POLICY "Обновить свою семью"
-  ON public.families FOR UPDATE USING (created_by = auth.uid());
+CREATE POLICY "Видеть свою семью" ON public.families FOR SELECT
+  USING (id IN (SELECT public.get_my_family_ids()));
+CREATE POLICY "Создать семью" ON public.families FOR INSERT
+  WITH CHECK (created_by = auth.uid());
+CREATE POLICY "Обновить свою семью" ON public.families FOR UPDATE
+  USING (created_by = auth.uid());
 
 -- Family members
-CREATE POLICY "Видеть участников семьи"
-  ON public.family_members FOR SELECT
-  USING (family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
-CREATE POLICY "Вступить в семью"
-  ON public.family_members FOR INSERT WITH CHECK (user_id = auth.uid());
-CREATE POLICY "Покинуть семью"
-  ON public.family_members FOR DELETE USING (user_id = auth.uid());
+CREATE POLICY "Видеть участников семьи" ON public.family_members FOR SELECT
+  USING (family_id IN (SELECT public.get_my_family_ids()));
+CREATE POLICY "Вступить в семью" ON public.family_members FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+CREATE POLICY "Покинуть семью" ON public.family_members FOR DELETE
+  USING (user_id = auth.uid());
 
--- Profiles — только члены одной семьи видят друг друга
-CREATE POLICY "Видеть профили своей семьи"
-  ON public.profiles FOR SELECT
+-- Profiles
+CREATE POLICY "Видеть профили своей семьи" ON public.profiles FOR SELECT
   USING (
     id = auth.uid() OR
     id IN (
-      SELECT fm2.user_id FROM public.family_members fm1
-      JOIN public.family_members fm2 ON fm1.family_id = fm2.family_id
-      WHERE fm1.user_id = auth.uid()
+      SELECT fm.user_id FROM public.family_members fm
+      WHERE fm.family_id IN (SELECT public.get_my_family_ids())
     )
   );
-CREATE POLICY "Пользователь создаёт свой профиль"
-  ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
-CREATE POLICY "Пользователь обновляет свой профиль"
-  ON public.profiles FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "Пользователь создаёт свой профиль" ON public.profiles FOR INSERT
+  WITH CHECK (auth.uid() = id);
+CREATE POLICY "Пользователь обновляет свой профиль" ON public.profiles FOR UPDATE
+  USING (auth.uid() = id);
 
 -- Stores
-CREATE POLICY "Семья видит магазины"
-  ON public.stores FOR SELECT
-  USING (family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
-CREATE POLICY "Семья создаёт магазины"
-  ON public.stores FOR INSERT
-  WITH CHECK (family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
-CREATE POLICY "Семья изменяет магазины"
-  ON public.stores FOR UPDATE
-  USING (family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
-CREATE POLICY "Семья удаляет магазины"
-  ON public.stores FOR DELETE
-  USING (family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
+CREATE POLICY "Семья видит магазины" ON public.stores FOR SELECT
+  USING (family_id IN (SELECT public.get_my_family_ids()));
+CREATE POLICY "Семья создаёт магазины" ON public.stores FOR INSERT
+  WITH CHECK (family_id IN (SELECT public.get_my_family_ids()));
+CREATE POLICY "Семья изменяет магазины" ON public.stores FOR UPDATE
+  USING (family_id IN (SELECT public.get_my_family_ids()));
+CREATE POLICY "Семья удаляет магазины" ON public.stores FOR DELETE
+  USING (family_id IN (SELECT public.get_my_family_ids()));
 
--- Shopping items (через family_id магазина)
-CREATE POLICY "Семья видит товары"
-  ON public.shopping_items FOR SELECT
-  USING (store_id IN (
-    SELECT id FROM public.stores
-    WHERE family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid())
-  ));
-CREATE POLICY "Семья добавляет товары"
-  ON public.shopping_items FOR INSERT
-  WITH CHECK (store_id IN (
-    SELECT id FROM public.stores
-    WHERE family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid())
-  ));
-CREATE POLICY "Семья изменяет товары"
-  ON public.shopping_items FOR UPDATE
-  USING (store_id IN (
-    SELECT id FROM public.stores
-    WHERE family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid())
-  ));
-CREATE POLICY "Семья удаляет товары"
-  ON public.shopping_items FOR DELETE
-  USING (store_id IN (
-    SELECT id FROM public.stores
-    WHERE family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid())
-  ));
+-- Shopping items
+CREATE POLICY "Семья видит товары" ON public.shopping_items FOR SELECT
+  USING (store_id IN (SELECT id FROM public.stores WHERE family_id IN (SELECT public.get_my_family_ids())));
+CREATE POLICY "Семья добавляет товары" ON public.shopping_items FOR INSERT
+  WITH CHECK (store_id IN (SELECT id FROM public.stores WHERE family_id IN (SELECT public.get_my_family_ids())));
+CREATE POLICY "Семья изменяет товары" ON public.shopping_items FOR UPDATE
+  USING (store_id IN (SELECT id FROM public.stores WHERE family_id IN (SELECT public.get_my_family_ids())));
+CREATE POLICY "Семья удаляет товары" ON public.shopping_items FOR DELETE
+  USING (store_id IN (SELECT id FROM public.stores WHERE family_id IN (SELECT public.get_my_family_ids())));
 
 -- Calendar events
-CREATE POLICY "Семья видит события"
-  ON public.calendar_events FOR SELECT
-  USING (family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
-CREATE POLICY "Семья создаёт события"
-  ON public.calendar_events FOR INSERT
-  WITH CHECK (family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
-CREATE POLICY "Семья изменяет события"
-  ON public.calendar_events FOR UPDATE
-  USING (family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
-CREATE POLICY "Семья удаляет события"
-  ON public.calendar_events FOR DELETE
-  USING (family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
+CREATE POLICY "Семья видит события" ON public.calendar_events FOR SELECT
+  USING (family_id IN (SELECT public.get_my_family_ids()));
+CREATE POLICY "Семья создаёт события" ON public.calendar_events FOR INSERT
+  WITH CHECK (family_id IN (SELECT public.get_my_family_ids()));
+CREATE POLICY "Семья изменяет события" ON public.calendar_events FOR UPDATE
+  USING (family_id IN (SELECT public.get_my_family_ids()));
+CREATE POLICY "Семья удаляет события" ON public.calendar_events FOR DELETE
+  USING (family_id IN (SELECT public.get_my_family_ids()));
 
 -- Tasks
-CREATE POLICY "Семья видит задачи"
-  ON public.tasks FOR SELECT
-  USING (family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
-CREATE POLICY "Семья создаёт задачи"
-  ON public.tasks FOR INSERT
-  WITH CHECK (family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
-CREATE POLICY "Семья изменяет задачи"
-  ON public.tasks FOR UPDATE
-  USING (family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
-CREATE POLICY "Семья удаляет задачи"
-  ON public.tasks FOR DELETE
-  USING (family_id IN (SELECT family_id FROM public.family_members WHERE user_id = auth.uid()));
+CREATE POLICY "Семья видит задачи" ON public.tasks FOR SELECT
+  USING (family_id IN (SELECT public.get_my_family_ids()));
+CREATE POLICY "Семья создаёт задачи" ON public.tasks FOR INSERT
+  WITH CHECK (family_id IN (SELECT public.get_my_family_ids()));
+CREATE POLICY "Семья изменяет задачи" ON public.tasks FOR UPDATE
+  USING (family_id IN (SELECT public.get_my_family_ids()));
+CREATE POLICY "Семья удаляет задачи" ON public.tasks FOR DELETE
+  USING (family_id IN (SELECT public.get_my_family_ids()));
 
 -- ─── Автосоздание профиля при регистрации ────────────────────
 CREATE OR REPLACE FUNCTION public.handle_new_user()
