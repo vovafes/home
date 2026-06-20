@@ -33,6 +33,19 @@ export interface ShoppingItem {
   checker?: Profile
 }
 
+export interface Task {
+  id: string
+  title: string
+  description: string | null
+  completed: boolean
+  completed_by: string | null
+  completed_at: string | null
+  created_by: string
+  created_at: string
+  profiles?: Profile
+  checker?: Profile
+}
+
 export interface CalendarEvent {
   id: string
   title: string

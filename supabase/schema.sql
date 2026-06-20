@@ -54,11 +54,24 @@ CREATE TABLE IF NOT EXISTS public.calendar_events (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ─── Задачи / уборка ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.tasks (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title        TEXT NOT NULL,
+  description  TEXT,
+  completed    BOOLEAN DEFAULT FALSE,
+  completed_by UUID REFERENCES auth.users(id),
+  completed_at TIMESTAMPTZ,
+  created_by   UUID NOT NULL REFERENCES auth.users(id),
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ─── Row Level Security ───────────────────────────────────────
 ALTER TABLE public.profiles        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stores          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.shopping_items  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.calendar_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tasks           ENABLE ROW LEVEL SECURITY;
 
 -- Profiles
 CREATE POLICY "Все видят профили"
@@ -97,6 +110,16 @@ CREATE POLICY "Все могут изменять события"
   ON public.calendar_events FOR UPDATE USING (auth.role() = 'authenticated');
 CREATE POLICY "Все могут удалять события"
   ON public.calendar_events FOR DELETE USING (auth.role() = 'authenticated');
+
+-- Tasks
+CREATE POLICY "Все видят задачи"
+  ON public.tasks FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Все могут создавать задачи"
+  ON public.tasks FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Все могут изменять задачи"
+  ON public.tasks FOR UPDATE USING (auth.role() = 'authenticated');
+CREATE POLICY "Все могут удалять задачи"
+  ON public.tasks FOR DELETE USING (auth.role() = 'authenticated');
 
 -- ─── Автосоздание профиля при регистрации ────────────────────
 CREATE OR REPLACE FUNCTION public.handle_new_user()

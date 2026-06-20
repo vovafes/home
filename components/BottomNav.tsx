@@ -2,10 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ShoppingCart, CalendarDays, User } from 'lucide-react'
+import { ShoppingCart, CalendarDays, CheckSquare, User } from 'lucide-react'
 
 const TABS = [
-  { href: '/shopping', label: 'Покупки',  Icon: ShoppingCart },
+  { href: '/shopping', label: 'Покупки',   Icon: ShoppingCart },
+  { href: '/tasks',    label: 'Задачи',    Icon: CheckSquare },
   { href: '/calendar', label: 'Календарь', Icon: CalendarDays },
   { href: '/profile',  label: 'Профиль',   Icon: User },
 ]
@@ -24,7 +25,9 @@ export default function BottomNav() {
       }}
     >
       {TABS.map(({ href, label, Icon }) => {
-        const active = pathname === href || (href === '/shopping' && pathname.startsWith('/shopping'))
+        const active = pathname === href
+          || (href === '/shopping' && pathname.startsWith('/shopping'))
+          || (href === '/tasks' && pathname.startsWith('/tasks'))
         return (
           <Link
             key={href}

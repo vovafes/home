@@ -135,7 +135,7 @@ export default function ShoppingPage() {
                   />
                   <button
                     onClick={(e) => deleteStore(store.id, e)}
-                    className="absolute bottom-3 right-3 w-6 h-6 rounded-lg flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+                    className="absolute bottom-3 right-3 w-6 h-6 rounded-lg flex items-center justify-center transition-opacity active:opacity-60"
                     style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}
                     title="Удалить магазин"
                   >
