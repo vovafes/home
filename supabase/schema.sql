@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS public.calendar_events (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title       TEXT NOT NULL,
   description TEXT,
+  location    TEXT,
   start_date  DATE NOT NULL,
   end_date    DATE,
   start_time  TIME,
@@ -53,6 +54,9 @@ CREATE TABLE IF NOT EXISTS public.calendar_events (
   user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Если таблица уже существует, добавить столбец location
+ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS location TEXT;
 
 -- ─── Задачи / уборка ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.tasks (

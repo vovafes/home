@@ -50,6 +50,7 @@ export interface CalendarEvent {
   id: string
   title: string
   description: string | null
+  location: string | null
   start_date: string
   end_date: string | null
   start_time: string | null
