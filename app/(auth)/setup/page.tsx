@@ -31,7 +31,7 @@ export default function SetupPage() {
       .single()
 
     if (fErr || !family) {
-      setError('Не удалось создать семью')
+      setError(fErr?.message ?? 'Не удалось создать семью')
       setLoading(false)
       return
     }
