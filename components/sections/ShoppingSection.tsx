@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Plus, ShoppingBag, X, Loader2, ChevronRight } from 'lucide-react'
 import Header from '@/components/Header'
 import { createClient } from '@/lib/supabase/client'
+import { getFamilyId } from '@/lib/family'
 import type { Store } from '@/lib/types'
 
 const PRESET_COLORS = [
@@ -49,10 +50,15 @@ export default function ShoppingSection({ color }: { color?: string }) {
   const addStore = async () => {
     if (!newName.trim()) return
     setSaving(true)
-    const { data: { user } } = await supabase.auth.getUser()
+    const [{ data: { user } }, familyId] = await Promise.all([
+      supabase.auth.getUser(),
+      getFamilyId(supabase),
+    ])
+    if (!familyId) { setSaving(false); return }
     const { data } = await supabase.from('stores').insert({
       name: newName.trim(), icon: newIcon, color: newColor,
       order_index: stores.length, created_by: user?.id,
+      family_id: familyId,
     }).select().single()
     if (data) {
       setStores((s) => [...s, data])

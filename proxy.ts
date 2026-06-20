@@ -26,17 +26,34 @@ export async function proxy(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   const { pathname } = request.nextUrl
 
-  const isAuthRoute = pathname === '/login' || pathname === '/register'
-  const isPublic = pathname.startsWith('/_next') || pathname.startsWith('/api') || pathname === '/favicon.ico'
+  const isAuthRoute  = pathname === '/login' || pathname === '/register'
+  const isSetupRoute = pathname === '/setup'
+  const isPublic     = pathname.startsWith('/_next') || pathname.startsWith('/api') || pathname === '/favicon.ico'
 
   if (isPublic) return supabaseResponse
 
-  if (!user && !isAuthRoute) {
+  // Not authenticated
+  if (!user) {
+    if (isAuthRoute || isSetupRoute) return supabaseResponse
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  if (user && isAuthRoute) {
-    return NextResponse.redirect(new URL('/shopping', request.url))
+  // Authenticated — check family membership
+  const { data: membership } = await supabase
+    .from('family_members')
+    .select('family_id')
+    .maybeSingle()
+
+  const hasFam = !!membership
+
+  if (isAuthRoute) {
+    return NextResponse.redirect(new URL(hasFam ? '/' : '/setup', request.url))
+  }
+  if (isSetupRoute && hasFam) {
+    return NextResponse.redirect(new URL('/', request.url))
+  }
+  if (!isSetupRoute && !hasFam) {
+    return NextResponse.redirect(new URL('/setup', request.url))
   }
 
   return supabaseResponse

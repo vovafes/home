@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Plus, X, Check, Trash2, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 import Header from '@/components/Header'
 import { createClient } from '@/lib/supabase/client'
+import { getFamilyId } from '@/lib/family'
 import type { Task, Profile } from '@/lib/types'
 
 function Avatar({ profile, size = 16 }: { profile?: Profile; size?: number }) {
@@ -59,13 +60,18 @@ export default function TasksSection({ color }: { color?: string }) {
   const addTask = async () => {
     if (!form.title.trim()) return
     setSaving(true)
-    const { data: { user } } = await supabase.auth.getUser()
+    const [{ data: { user } }, familyId] = await Promise.all([
+      supabase.auth.getUser(),
+      getFamilyId(supabase),
+    ])
+    if (!familyId) { setSaving(false); return }
     const { data } = await supabase
       .from('tasks')
       .insert({
         title: form.title.trim(),
         description: form.description.trim() || null,
         created_by: user!.id,
+        family_id: familyId,
       })
       .select('*, profiles:created_by(id,name,color,avatar_url), checker:completed_by(id,name,color,avatar_url)')
       .single()

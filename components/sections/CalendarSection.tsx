@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { ChevronLeft, ChevronRight, Plus, X, Check, Loader2, Clock, MapPin } from 'lucide-react'
 import Header from '@/components/Header'
 import { createClient } from '@/lib/supabase/client'
+import { getFamilyId } from '@/lib/family'
 import type { CalendarEvent, Profile } from '@/lib/types'
 
 const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь',
@@ -152,10 +153,14 @@ export default function CalendarSection({ color }: { color?: string }) {
         .single()
       if (data) setEvents((prev) => prev.map((e) => e.id === editEvent.id ? data as CalendarEvent : e))
     } else {
-      const { data: { user } } = await supabase.auth.getUser()
+      const [{ data: { user } }, familyId] = await Promise.all([
+        supabase.auth.getUser(),
+        getFamilyId(supabase),
+      ])
+      if (!familyId) { setSaving(false); return }
       const { data } = await supabase
         .from('calendar_events')
-        .insert({ ...payload, user_id: user!.id })
+        .insert({ ...payload, user_id: user!.id, family_id: familyId })
         .select('*, profiles:user_id(id,name,color,avatar_url)')
         .single()
       if (data) setEvents((prev) => [...prev, data as CalendarEvent])

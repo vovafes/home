@@ -1,3 +1,11 @@
+export interface Family {
+  id: string
+  name: string
+  invite_code: string
+  created_by: string | null
+  created_at: string
+}
+
 export interface Profile {
   id: string
   name: string

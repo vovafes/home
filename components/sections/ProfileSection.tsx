@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Camera, Loader2, Check, LogOut, User, Moon, Sun } from 'lucide-react'
+import { Camera, Loader2, Check, LogOut, User, Moon, Sun, Copy, CheckCheck } from 'lucide-react'
 import Header from '@/components/Header'
 import { createClient } from '@/lib/supabase/client'
-import type { Profile } from '@/lib/types'
+import type { Profile, Family } from '@/lib/types'
 
 const COLORS = [
   { value: '#4F46E5', label: 'Индиго' },
@@ -32,6 +32,8 @@ export default function ProfileSection({ color }: { color?: string }) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [members, setMembers] = useState<Profile[]>([])
+  const [family, setFamily] = useState<Family | null>(null)
+  const [copied, setCopied] = useState(false)
   const [dark, setDark] = useState(false)
 
   useEffect(() => {
@@ -56,9 +58,10 @@ export default function ProfileSection({ color }: { color?: string }) {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      const [profileRes, membersRes] = await Promise.all([
+      const [profileRes, membersRes, membershipRes] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', user.id).single(),
         supabase.from('profiles').select('*').order('name'),
+        supabase.from('family_members').select('family_id, families(id,name,invite_code)').maybeSingle(),
       ])
 
       if (profileRes.data) {
@@ -68,6 +71,7 @@ export default function ProfileSection({ color }: { color?: string }) {
         setAvatarPreview(profileRes.data.avatar_url ?? '')
       }
       if (membersRes.data) setMembers(membersRes.data)
+      if (membershipRes.data?.families) setFamily(membershipRes.data.families as unknown as Family)
       setLoading(false)
     }
     load()
@@ -99,6 +103,13 @@ export default function ProfileSection({ color }: { color?: string }) {
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
+  }
+
+  const copyCode = () => {
+    if (!family) return
+    navigator.clipboard.writeText(family.invite_code)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
   const signOut = async () => {
@@ -201,6 +212,38 @@ export default function ProfileSection({ color }: { color?: string }) {
             {saved ? 'Сохранено!' : 'Сохранить'}
           </button>
         </div>
+
+        {/* Family code */}
+        {family && (
+          <div className="rounded-2xl border p-5 flex flex-col gap-3" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{family.name}</p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Код семьи</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span
+                className="font-mono font-bold tracking-[0.25em] flex-1"
+                style={{ fontSize: 26, color: color ?? 'var(--primary)' }}
+              >
+                {family.invite_code}
+              </span>
+              <button
+                onClick={copyCode}
+                className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition-all active:scale-95"
+                style={{
+                  background: copied ? 'var(--success-soft)' : 'var(--surface-2)',
+                  color: copied ? 'var(--success)' : 'var(--text-muted)',
+                }}
+              >
+                {copied ? <CheckCheck size={14} /> : <Copy size={14} />}
+                {copied ? 'Скопировано' : 'Скопировать'}
+              </button>
+            </div>
+            <p className="text-xs" style={{ color: 'var(--text-subtle)' }}>
+              Поделитесь этим кодом с членами семьи
+            </p>
+          </div>
+        )}
 
         {/* Family members */}
         {members.length > 1 && (
