@@ -27,9 +27,21 @@ export default function ShoppingSection({ color }: { color?: string }) {
 
   const supabase = createClient()
 
-  const loadStores = useCallback(async () => {
-    const { data } = await supabase.from('stores').select('*').order('order_index')
-    if (data) setStores(data)
+  const PAGE_SIZE = 24
+  const [page, setPage] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
+
+  const loadStores = useCallback(async (pageNum = 0) => {
+    const from = pageNum * PAGE_SIZE
+    const to = from + PAGE_SIZE - 1
+    const { data } = await supabase.from('stores').select('*').order('order_index').range(from, to)
+    if (data) {
+      if (pageNum === 0) setStores(data)
+      else setStores((s) => [...s, ...(data as Store[])])
+      setHasMore((data as Store[]).length === PAGE_SIZE)
+    } else {
+      setHasMore(false)
+    }
     setLoading(false)
   }, [])
 
@@ -43,15 +55,22 @@ export default function ShoppingSection({ color }: { color?: string }) {
   }, [])
 
   useEffect(() => {
-    loadStores()
+    // initial load
+    loadStores(0)
     loadCounts()
     const channel = supabase
       .channel('stores')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'stores' }, () => { loadStores(); loadCounts() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stores' }, () => { setPage(0); loadStores(0); loadCounts() })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items' }, loadCounts)
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [loadStores, loadCounts])
+
+  const loadMore = () => {
+    const next = page + 1
+    setPage(next)
+    loadStores(next)
+  }
 
   const addStore = async () => {
     if (!newName.trim()) return
@@ -79,6 +98,7 @@ export default function ShoppingSection({ color }: { color?: string }) {
   const deleteStore = async (id: string, e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    if (!confirm('Удалить магазин и все связанные с ним данные?')) return
     await supabase.from('stores').delete().eq('id', id)
     setStores((s) => s.filter((st) => st.id !== id))
   }
@@ -146,10 +166,17 @@ export default function ShoppingSection({ color }: { color?: string }) {
                 Запустите SQL-схему в Supabase чтобы появились магазины
               </p>
             )}
+
+            {hasMore && stores.length > 0 && (
+              <div className="mt-4 flex justify-center">
+                <button onClick={loadMore} className="rounded-xl px-4 py-2 border" style={{ borderColor: 'var(--border)' }}>
+                  Загрузить ещё
+                </button>
+              </div>
+            )}
           </>
         )}
       </main>
-
       {showAdd && (
         <>
           <div className="sheet-backdrop" onClick={() => setShowAdd(false)} />

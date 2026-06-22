@@ -22,6 +22,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ru" className={geist.variable} suppressHydrationWarning>
+      <head>
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#4F46E5" />
+      </head>
       <body className="h-full">{children}</body>
     </html>
   )

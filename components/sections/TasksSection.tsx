@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import VirtualGroup from '@/components/VirtualGroup'
 import { Plus, X, Check, Trash2, ChevronDown, ChevronUp, Loader2, Users, CalendarDays } from 'lucide-react'
 import Header from '@/components/Header'
 import { createClient } from '@/lib/supabase/client'
@@ -54,15 +55,16 @@ export default function TasksSection({ color }: { color?: string }) {
   const [filter, setFilter] = useState<string>('all') // 'all' | profileId
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all'|'active'|'done'>('all')
+  const [dateFilter, setDateFilter] = useState<'all'|'today'|'week'|'nodate'>('all')
   const [showSheet, setShowSheet] = useState(false)
-  const [form, setForm] = useState<{ title: string; description: string; assignedTo: string | null; dueDate: string }>({
-    title: '', description: '', assignedTo: null, dueDate: '',
+  const [form, setForm] = useState<{ title: string; description: string; assignedTo: string | null; dueDate: string; recurrence?: string }>({
+    title: '', description: '', assignedTo: null, dueDate: '', recurrence: '' ,
   })
   const [saving, setSaving] = useState(false)
   const [page, setPage] = useState(0)
   const [hasMore, setHasMore] = useState(true)
 
-  const load = useCallback(async (pageNum = 0, opts?: { q?: string; status?: string }) => {
+  const load = useCallback(async (pageNum = 0, opts?: { q?: string; status?: string; date?: string }) => {
     const from = pageNum * PAGE_SIZE
     const to = from + PAGE_SIZE - 1
     let query = supabase
@@ -77,6 +79,25 @@ export default function TasksSection({ color }: { color?: string }) {
     if (opts?.status === 'active') query = query.eq('completed', false)
     if (opts?.status === 'done') query = query.eq('completed', true)
 
+    if (opts?.date === 'today') {
+      const today = new Date()
+      today.setHours(0,0,0,0)
+      const iso = today.toISOString().slice(0,10)
+      query = query.eq('due_date', iso)
+    }
+    if (opts?.date === 'week') {
+      const now = new Date()
+      const start = new Date(now)
+      start.setHours(0,0,0,0)
+      start.setDate(start.getDate() - start.getDay() + 1) // Monday
+      const end = new Date(start)
+      end.setDate(start.getDate() + 6)
+      const s = start.toISOString().slice(0,10)
+      const e = end.toISOString().slice(0,10)
+      query = query.gte('due_date', s).lte('due_date', e)
+    }
+    if (opts?.date === 'nodate') query = query.is('due_date', null)
+
     const { data } = await query.range(from, to)
     if (data) {
       if (pageNum === 0) setTasks(data as Task[])
@@ -90,7 +111,7 @@ export default function TasksSection({ color }: { color?: string }) {
 
   useEffect(() => {
     // initial load
-    load(0, { q: search, status: statusFilter })
+    load(0, { q: search, status: statusFilter, date: dateFilter })
     supabase.from('profiles').select('*').order('created_at').then(({ data }) => {
       if (data) setMembers(data as Profile[])
     })
@@ -102,19 +123,19 @@ export default function TasksSection({ color }: { color?: string }) {
     })
     const channel = supabase
       .channel('tasks')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => { setPage(0); load(0, { q: search, status: statusFilter }) })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => { setPage(0); load(0, { q: search, status: statusFilter, date: dateFilter }) })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [load, search, statusFilter])
+  }, [load, search, statusFilter, dateFilter])
 
   const loadMore = () => {
     const next = page + 1
     setPage(next)
-    load(next, { q: search, status: statusFilter })
+    load(next, { q: search, status: statusFilter, date: dateFilter })
   }
 
   const openSheet = () => {
-    setForm({ title: '', description: '', assignedTo: filter === 'all' ? null : filter, dueDate: '' })
+    setForm({ title: '', description: '', assignedTo: filter === 'all' ? null : filter, dueDate: '', recurrence: '' })
     setShowSheet(true)
   }
 
@@ -134,6 +155,7 @@ export default function TasksSection({ color }: { color?: string }) {
         created_by: user!.id,
         assigned_to: form.assignedTo,
         due_date: form.dueDate || null,
+        recurrence: form.recurrence || null,
         family_id: familyId,
       })
       .select(TASK_SELECT)
@@ -160,14 +182,40 @@ export default function TasksSection({ color }: { color?: string }) {
           : t
       )
     )
+
+    // If task is recurring (weekly), create next occurrence
+    if (nowDone && task.recurrence === 'weekly') {
+      try {
+        const familyId = await getFamilyId(supabase)
+        if (familyId && task.due_date) {
+          const d = new Date(task.due_date + 'T00:00:00')
+          d.setDate(d.getDate() + 7)
+          const nextDate = d.toISOString().slice(0, 10)
+          const { data } = await supabase.from('tasks').insert({
+            title: task.title,
+            description: task.description,
+            created_by: user!.id,
+            assigned_to: task.assigned_to,
+            due_date: nextDate,
+            recurrence: task.recurrence,
+            family_id: familyId,
+          }).select(TASK_SELECT).single()
+          if (data) setTasks((prev) => [data as Task, ...prev])
+        }
+      } catch (e) {
+        // ignore errors for now
+      }
+    }
   }
 
   const deleteTask = async (id: string) => {
+    if (!confirm('Удалить задачу? Это действие необратимо.')) return
     await supabase.from('tasks').delete().eq('id', id)
     setTasks((prev) => prev.filter((t) => t.id !== id))
   }
 
   const clearDone = async () => {
+    if (!confirm('Удалить все выполненные задачи? Это действие необратимо.')) return
     const ids = tasks.filter((t) => t.completed).map((t) => t.id)
     await supabase.from('tasks').delete().in('id', ids)
     setTasks((prev) => prev.filter((t) => !t.completed))
@@ -204,7 +252,7 @@ export default function TasksSection({ color }: { color?: string }) {
           </div>
         ) : (
           <>
-            {/* Search + Фильтр по участникам + статус */}
+            {/* Search + Фильтр по участникам + статус + дата */}
             <div className="flex gap-2 items-center">
               <input
                 type="search"
@@ -220,6 +268,14 @@ export default function TasksSection({ color }: { color?: string }) {
                 <option value="all">Все</option>
                 <option value="active">Нужно сделать</option>
                 <option value="done">Выполнено</option>
+              </select>
+              <select value={dateFilter} onChange={(e) => { setDateFilter(e.target.value as any); setPage(0); }}
+                className="rounded-xl border px-2 py-2 text-sm"
+                style={{ background: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' }}>
+                <option value="all">По дате</option>
+                <option value="today">Сегодня</option>
+                <option value="week">Эта неделя</option>
+                <option value="nodate">Без даты</option>
               </select>
             </div>
 
@@ -249,9 +305,15 @@ export default function TasksSection({ color }: { color?: string }) {
                   style={{ color: 'var(--text-muted)' }}>
                   {g.label} · {g.items.length}
                 </p>
-                {g.items.map((task) => (
-                  <TaskCard key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />
-                ))}
+                {/* Virtualized list for group items */}
+                {g.items.length > 50 ? (
+                  // use simple virtualization for long groups
+                  <VirtualGroup items={g.items} onToggle={toggleTask} onDelete={deleteTask} />
+                ) : (
+                  g.items.map((task) => (
+                    <TaskCard key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />
+                  ))
+                )}
               </div>
             ))}
 
@@ -366,8 +428,20 @@ export default function TasksSection({ color }: { color?: string }) {
                   className="w-full rounded-xl border px-4 py-3 text-sm outline-none"
                   style={{ background: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' }}
                 />
-              </div>
+               </div>
 
+               {/* Recurrence */}
+               <div className="flex flex-col gap-2">
+                <p className="text-xs font-semibold uppercase tracking-widest px-1" style={{ color: 'var(--text-muted)' }}>
+                  Повторять
+                </p>
+                <select value={form.recurrence ?? ''} onChange={(e) => setForm((f) => ({ ...f, recurrence: e.target.value }))}
+                                  className="w-full rounded-xl border px-3 py-3 text-sm outline-none"
+                                  style={{ background: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' }}>
+                  <option value="">Никогда</option>
+                  <option value="weekly">Каждую неделю</option>
+                </select>
+                </div>
               <button
                 onClick={addTask}
                 disabled={!form.title.trim() || saving}
@@ -415,6 +489,13 @@ function TaskCard({
   onToggle: (task: Task) => void
   onDelete: (id: string) => void
 }) {
+  const [anim, setAnim] = useState(false)
+  const handleToggle = () => {
+    setAnim(true)
+    onToggle(task)
+    setTimeout(() => setAnim(false), 350)
+  }
+
   return (
     <div
       className="rounded-2xl border flex items-start gap-3 p-3.5 transition-all"
@@ -425,8 +506,8 @@ function TaskCard({
       }}
     >
       <button
-        onClick={() => onToggle(task)}
-        className="mt-0.5 w-6 h-6 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all active:scale-90"
+        onClick={handleToggle}
+        className={`mt-0.5 w-6 h-6 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all active:scale-90 ${anim ? 'animate-check-pop' : ''}`}
         style={{
           background: task.completed ? 'var(--success)' : 'transparent',
           borderColor: task.completed ? 'var(--success)' : 'var(--border-strong)',
@@ -473,6 +554,7 @@ function TaskCard({
 
       <button
         onClick={() => onDelete(task.id)}
+        aria-label="Удалить задачу"
         className="p-1.5 rounded-lg active:opacity-60 flex-shrink-0"
         style={{ color: 'var(--text-subtle)' }}
       >

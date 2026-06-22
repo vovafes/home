@@ -171,6 +171,7 @@ export default function CalendarSection({ color }: { color?: string }) {
   }
 
   const deleteEvent = async (id: string) => {
+    if (!confirm('Удалить событие? Это действие необратимо.')) return
     await supabase.from('calendar_events').delete().eq('id', id)
     setEvents((prev) => prev.filter((e) => e.id !== id))
     setShowSheet(false)

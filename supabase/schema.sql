@@ -97,6 +97,12 @@ ALTER TABLE public.stores          ADD COLUMN IF NOT EXISTS family_id UUID REFER
 ALTER TABLE public.tasks           ADD COLUMN IF NOT EXISTS family_id UUID REFERENCES public.families(id);
 ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS family_id UUID REFERENCES public.families(id);
 ALTER TABLE public.shopping_items  ADD COLUMN IF NOT EXISTS category TEXT; -- Категория товара (например: молочное, овощи)
+ALTER TABLE public.shopping_items  ADD COLUMN IF NOT EXISTS route_order INTEGER; -- порядок для маршрута в магазине
+ALTER TABLE public.shopping_items  ADD COLUMN IF NOT EXISTS times_purchased INTEGER DEFAULT 0;
+ALTER TABLE public.shopping_items  ADD COLUMN IF NOT EXISTS last_purchased_at TIMESTAMPTZ;
+
+-- Задачи: повторяющаяся периодичность (например 'weekly')
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS recurrence TEXT;
 
 -- Назначение задачи участнику (NULL = всем) и срок
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS assigned_to UUID;

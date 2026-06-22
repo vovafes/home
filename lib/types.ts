@@ -38,6 +38,9 @@ export interface ShoppingItem {
   added_by: string
   created_at: string
   category?: string | null
+  route_order?: number | null
+  times_purchased?: number | null
+  last_purchased_at?: string | null
   profiles?: Profile
   checker?: Profile
 }
@@ -52,6 +55,7 @@ export interface Task {
   created_by: string
   assigned_to: string | null
   due_date: string | null
+  recurrence?: string | null
   created_at: string
   profiles?: Profile
   checker?: Profile

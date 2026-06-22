@@ -7,6 +7,7 @@ import {
   Camera, Loader2, ArrowLeft, ImageIcon,
 } from 'lucide-react'
 import Header from '@/components/Header'
+import VirtualList from '@/components/VirtualList'
 import { createClient } from '@/lib/supabase/client'
 import type { Store, ShoppingItem, Profile } from '@/lib/types'
 
@@ -40,6 +41,7 @@ export default function StorePage() {
   const [currentUser, setCurrentUser] = useState<Profile | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all'|'active'|'checked'>('all')
+  const [sort, setSort] = useState<'default'|'category'|'route'|'name'>('default')
 
   // Sheet state
   const [showSheet, setShowSheet] = useState(false)
@@ -57,7 +59,10 @@ export default function StorePage() {
       .from('shopping_items')
       .select('*, profiles:added_by(id,name,color,avatar_url), checker:checked_by(id,name,color,avatar_url)')
       .eq('store_id', storeId)
-      .order('created_at', { ascending: false })
+
+    if (sort === 'route') itemsQuery = itemsQuery.order('route_order', { ascending: true })
+    else if (sort === 'name') itemsQuery = itemsQuery.order('name', { ascending: true })
+    else itemsQuery = itemsQuery.order('created_at', { ascending: false })
 
     if (search) {
       const q = search.replace(/%/g, '\\%')
@@ -173,9 +178,17 @@ export default function StorePage() {
       if (data) setItems((prev) => prev.map((i) => (i.id === editItem.id ? data as ShoppingItem : i)))
     } else {
       const { data: { user } } = await supabase.auth.getUser()
+      // compute next route_order
+      const { data: maxRes } = await supabase
+        .from('shopping_items')
+        .select('route_order')
+        .eq('store_id', storeId)
+        .order('route_order', { ascending: false })
+        .limit(1)
+      const nextOrder = (maxRes && maxRes[0] && (maxRes[0] as any).route_order ? (maxRes[0] as any).route_order : 0) + 1
       const { data } = await supabase
         .from('shopping_items')
-        .insert({ ...payload, store_id: storeId, added_by: user!.id })
+        .insert({ ...payload, store_id: storeId, added_by: user!.id, route_order: nextOrder })
         .select('*, profiles:added_by(id,name,color,avatar_url), checker:checked_by(id,name,color,avatar_url)')
         .single()
       if (data) setItems((prev) => [data as ShoppingItem, ...prev])
@@ -189,11 +202,11 @@ export default function StorePage() {
     const { data: { user } } = await supabase.auth.getUser()
     const nowChecked = !item.checked
 
-    await supabase.from('shopping_items').update(
-      nowChecked
-        ? { checked: true, checked_by: user?.id ?? null, checked_at: new Date().toISOString() }
-        : { checked: false, checked_by: null, checked_at: null }
-    ).eq('id', item.id)
+    const updatePayload = nowChecked
+      ? { checked: true, checked_by: user?.id ?? null, checked_at: new Date().toISOString(), times_purchased: (item.times_purchased ?? 0) + 1, last_purchased_at: new Date().toISOString() }
+      : { checked: false, checked_by: null, checked_at: null }
+
+    await supabase.from('shopping_items').update(updatePayload).eq('id', item.id)
 
     setItems((prev) =>
       prev.map((i): ShoppingItem =>
@@ -204,6 +217,8 @@ export default function StorePage() {
               checked_by: nowChecked ? (user?.id ?? null) : null,
               checked_at: nowChecked ? new Date().toISOString() : null,
               checker: nowChecked ? (currentUser ?? undefined) : undefined,
+              times_purchased: nowChecked ? ((i.times_purchased ?? 0) + 1) : i.times_purchased,
+              last_purchased_at: nowChecked ? new Date().toISOString() : i.last_purchased_at,
             }
           : i
       )
@@ -211,11 +226,48 @@ export default function StorePage() {
   }
 
   const deleteItem = async (id: string) => {
+    if (!confirm('Удалить товар? Это действие необратимо.')) return
     await supabase.from('shopping_items').delete().eq('id', id)
     setItems((prev) => prev.filter((i) => i.id !== id))
   }
 
+  const moveUp = async (item: ShoppingItem) => {
+    // find neighbor with smaller route_order
+    const curOrder = item.route_order ?? 0
+    const { data: neighbor } = await supabase
+      .from('shopping_items')
+      .select('id,route_order')
+      .eq('store_id', storeId)
+      .lt('route_order', curOrder)
+      .order('route_order', { ascending: false })
+      .limit(1)
+    if (!neighbor || neighbor.length === 0) return
+    const n = neighbor[0] as any
+    // swap
+    await supabase.from('shopping_items').update({ route_order: curOrder }).eq('id', n.id)
+    await supabase.from('shopping_items').update({ route_order: n.route_order }).eq('id', item.id)
+    load()
+  }
+
+  const moveDown = async (item: ShoppingItem) => {
+    const curOrder = item.route_order ?? 0
+    const { data: neighbor } = await supabase
+      .from('shopping_items')
+      .select('id,route_order')
+      .eq('store_id', storeId)
+      .gt('route_order', curOrder)
+      .order('route_order', { ascending: true })
+      .limit(1)
+    if (!neighbor || neighbor.length === 0) return
+    const n = neighbor[0] as any
+    // swap
+    await supabase.from('shopping_items').update({ route_order: curOrder }).eq('id', n.id)
+    await supabase.from('shopping_items').update({ route_order: n.route_order }).eq('id', item.id)
+    load()
+  }
+
   const clearChecked = async () => {
+    if (!confirm('Удалить все купленные товары? Это действие необратимо.')) return
     const ids = items.filter((i) => i.checked).map((i) => i.id)
     await supabase.from('shopping_items').delete().in('id', ids)
     setItems((prev) => prev.filter((i) => !i.checked))
@@ -257,6 +309,52 @@ export default function StorePage() {
               <span className="text-sm font-medium">Добавить товар</span>
             </button>
 
+            {/* Frequently bought quick-add */}
+            {(() => {
+              const frequent = items
+                .filter((i) => (i.times_purchased ?? 0) > 0)
+                .sort((a, b) => (b.times_purchased ?? 0) - (a.times_purchased ?? 0))
+                .slice(0, 8)
+              if (frequent.length === 0) return null
+              return (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-widest mt-2 px-1" style={{ color: 'var(--text-muted)' }}>
+                    Часто покупаемые
+                  </p>
+                  <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-1 px-1 py-2">
+                    {frequent.map((f) => (
+                      <button key={f.id} onClick={async () => {
+                        const { data: { user } } = await supabase.auth.getUser()
+                        const { data: maxRes } = await supabase
+                          .from('shopping_items')
+                          .select('route_order')
+                          .eq('store_id', storeId)
+                          .order('route_order', { ascending: false })
+                          .limit(1)
+                        const nextOrder = (maxRes && maxRes[0] && (maxRes[0] as any).route_order ? (maxRes[0] as any).route_order : 0) + 1
+                        const { data } = await supabase.from('shopping_items').insert({
+                          name: f.name,
+                          note: f.note,
+                          quantity: f.quantity,
+                          unit: f.unit,
+                          photo_url: f.photo_url,
+                          category: f.category,
+                          store_id: storeId,
+                          added_by: user!.id,
+                          route_order: nextOrder,
+                        }).select('*, profiles:added_by(id,name,color,avatar_url), checker:checked_by(id,name,color,avatar_url)').single()
+                        if (data) setItems((prev) => [data as ShoppingItem, ...prev])
+                      }}
+                        className="rounded-full px-3 py-1 text-sm border"
+                        style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
+                        {f.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+
             {/* Sort / grouping */}
             <div className="flex items-center gap-2 mt-2">
               <input
@@ -273,6 +371,15 @@ export default function StorePage() {
                 <option value="all">Все</option>
                 <option value="active">Нужно купить</option>
                 <option value="checked">Куплено</option>
+              </select>
+
+              <select value={sort} onChange={(e) => setSort(e.target.value as any)}
+                className="rounded-xl border px-2 py-2 text-sm"
+                style={{ background: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' }}>
+                <option value="default">По умолчанию</option>
+                <option value="category">По категории</option>
+                <option value="route">По маршруту</option>
+                <option value="name">По имени</option>
               </select>
             </div>
 
@@ -297,15 +404,21 @@ export default function StorePage() {
                           {k} · {groups[k].length}
                         </p>
                         <div className="flex flex-col gap-2">
-                          {groups[k].map((item) => (
-                            <ItemCard
-                              key={item.id}
-                              item={item}
-                              onCheck={toggleCheck}
-                              onEdit={openEdit}
-                              onDelete={deleteItem}
-                            />
-                          ))}
+                          {groups[k].length > 60 ? (
+                            <VirtualList items={groups[k]} onCheck={toggleCheck} onEdit={openEdit} onDelete={deleteItem} onMoveUp={moveUp} onMoveDown={moveDown} />
+                          ) : (
+                            groups[k].map((item) => (
+                              <ItemCard
+                                key={item.id}
+                                item={item}
+                                onCheck={toggleCheck}
+                                onEdit={openEdit}
+                                onDelete={deleteItem}
+                                onMoveUp={moveUp}
+                                onMoveDown={moveDown}
+                              />
+                            ))
+                          )}
                         </div>
                       </div>
                     ))
@@ -351,6 +464,8 @@ export default function StorePage() {
                         onCheck={toggleCheck}
                         onEdit={openEdit}
                         onDelete={deleteItem}
+                        onMoveUp={moveUp}
+                        onMoveDown={moveDown}
                       />
                     ))}
                   </div>
@@ -492,12 +607,23 @@ function ItemCard({
   onCheck,
   onEdit,
   onDelete,
+  onMoveUp,
+  onMoveDown,
 }: {
   item: ShoppingItem
   onCheck: (item: ShoppingItem) => void
   onEdit: (item: ShoppingItem) => void
   onDelete: (id: string) => void
+  onMoveUp: (item: ShoppingItem) => void
+  onMoveDown: (item: ShoppingItem) => void
 }) {
+  const [anim, setAnim] = useState(false)
+  const handleCheck = () => {
+    setAnim(true)
+    onCheck(item)
+    setTimeout(() => setAnim(false), 350)
+  }
+
   return (
     <div
       className="rounded-2xl border flex items-start gap-3 p-3 transition-all"
@@ -509,8 +635,8 @@ function ItemCard({
     >
       {/* Checkbox */}
       <button
-        onClick={() => onCheck(item)}
-        className="mt-0.5 w-6 h-6 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all active:scale-90"
+        onClick={handleCheck}
+        className={`mt-0.5 w-6 h-6 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all active:scale-90 ${anim ? 'animate-check-pop' : ''}`}
         style={{
           background: item.checked ? 'var(--success)' : 'transparent',
           borderColor: item.checked ? 'var(--success)' : 'var(--border-strong)',
@@ -579,13 +705,32 @@ function ItemCard({
       </button>
 
       {/* Delete */}
-      <button
-        onClick={() => onDelete(item.id)}
-        className="p-1.5 rounded-lg active:opacity-60 flex-shrink-0"
-        style={{ color: 'var(--text-subtle)' }}
-      >
-        <X size={15} />
-      </button>
-    </div>
+  <div className="flex items-center gap-2">
+    <button
+      onClick={() => onMoveUp(item)}
+      className="p-1.5 rounded-lg active:opacity-60 flex-shrink-0"
+      style={{ color: 'var(--text-subtle)' }}
+      title="Переместить вверх"
+    >
+      ▲
+    </button>
+    <button
+      onClick={() => onMoveDown(item)}
+      className="p-1.5 rounded-lg active:opacity-60 flex-shrink-0"
+      style={{ color: 'var(--text-subtle)' }}
+      title="Переместить вниз"
+    >
+      ▼
+    </button>
+    <button
+      onClick={() => onDelete(item.id)}
+      aria-label="Удалить товар"
+      className="p-1.5 rounded-lg active:opacity-60 flex-shrink-0"
+      style={{ color: 'var(--text-subtle)' }}
+    >
+      <X size={15} />
+    </button>
+  </div>
+</div>
   )
 }
