@@ -10,6 +10,7 @@ import Header from '@/components/Header'
 import VirtualList from '@/components/VirtualList'
 import ConfirmModal from '@/components/ConfirmModal'
 import Toast from '@/components/Toast'
+import UIState from '@/components/UIState'
 import { createClient } from '@/lib/supabase/client'
 import type { Store, ShoppingItem, Profile } from '@/lib/types'
 
@@ -44,6 +45,8 @@ export default function StorePage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all'|'active'|'checked'>('all')
   const [sort, setSort] = useState<'default'|'category'|'route'|'name'>('default')
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [reordering, setReordering] = useState(false)
 
   // Sheet state
   const [showSheet, setShowSheet] = useState(false)
@@ -265,6 +268,45 @@ export default function StorePage() {
     load()
   }
 
+  // Drag & drop handlers for route ordering
+  const onDragStart = (e: React.DragEvent, id: string) => {
+    setDraggingId(id)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
+  const onDropOn = async (e: React.DragEvent, targetId: string) => {
+    e.preventDefault()
+    const fromId = draggingId
+    setDraggingId(null)
+    if (!fromId || fromId === targetId) return
+    setReordering(true)
+    // reorder items array locally
+    const arr = [...items]
+    const fromIndex = arr.findIndex((i) => i.id === fromId)
+    const toIndex = arr.findIndex((i) => i.id === targetId)
+    if (fromIndex === -1 || toIndex === -1) { setReordering(false); return }
+    const [moved] = arr.splice(fromIndex, 1)
+    arr.splice(toIndex, 0, moved)
+    // assign new route_order sequentially and persist changed ones
+    const updates: { id: string; route_order: number }[] = []
+    for (let i = 0; i < arr.length; i++) {
+      const desired = i + 1
+      if ((arr[i].route_order ?? 0) !== desired) updates.push({ id: arr[i].id, route_order: desired })
+      arr[i].route_order = desired
+    }
+    setItems(arr)
+    try {
+      await Promise.all(updates.map((u) => supabase.from('shopping_items').update({ route_order: u.route_order }).eq('id', u.id)))
+    } catch (err) {
+      setToasts((s) => [...s, { id: String(Date.now()), message: 'Ошибка при сохранении порядка', undoLabel: 'Перезагрузить', onUndo: () => load() }])
+      await load()
+    }
+    setReordering(false)
+  }
+
   const moveDown = async (item: ShoppingItem) => {
     const curOrder = item.route_order ?? 0
     const { data: neighbor } = await supabase
@@ -324,9 +366,7 @@ export default function StorePage() {
 
       <main className="px-4 pt-4 pb-6 flex flex-col gap-4">
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 size={24} className="animate-spin" style={{ color: 'var(--text-muted)' }} />
-          </div>
+          <UIState type="loading" message="Загрузка списка магазина…" />
         ) : (
           <>
             {/* Add button */}
@@ -438,15 +478,24 @@ export default function StorePage() {
                             <VirtualList items={groups[k]} onCheck={toggleCheck} onEdit={openEdit} onDelete={deleteItem} onMoveUp={moveUp} onMoveDown={moveDown} />
                           ) : (
                             groups[k].map((item) => (
-                              <ItemCard
-                                key={item.id}
-                                item={item}
-                                onCheck={toggleCheck}
-                                onEdit={openEdit}
-                                onDelete={deleteItem}
-                                onMoveUp={moveUp}
-                                onMoveDown={moveDown}
-                              />
+                              <div key={item.id} draggable onDragStart={(e) => onDragStart(e, item.id)} onDragOver={onDragOver} onDrop={(e) => onDropOn(e, item.id)}>
+                                <ItemCard
+                                  key={item.id}
+                                  item={item}
+                                  onCheck={toggleCheck}
+                                  onEdit={openEdit}
+                                  onDelete={deleteItem}
+                                  onMoveUp={moveUp}
+                                  onMoveDown={moveDown}
+                                  onToggleFrequent={async (id) => {
+                                    const it = items.find((x) => x.id === id)
+                                    if (!it) return
+                                    const newVal = (it.times_purchased ?? 0) > 0 ? 0 : 1
+                                    await supabase.from('shopping_items').update({ times_purchased: newVal }).eq('id', id)
+                                    setItems((prev) => prev.map((p) => p.id === id ? { ...p, times_purchased: newVal } : p))
+                                  }}
+                                />
+                              </div>
                             ))
                           )}
                         </div>
@@ -458,9 +507,7 @@ export default function StorePage() {
             )}
 
             {active.length === 0 && done.length === 0 && (
-              <p className="text-center text-sm py-10" style={{ color: 'var(--text-muted)' }}>
-                Список пуст — добавь первый товар
-              </p>
+              <UIState type="empty" message="Список пуст — добавь первый товар" actionLabel="Добавить" onAction={openAdd} />
             )}
 
             {/* Done items */}
@@ -488,15 +535,24 @@ export default function StorePage() {
                 {showDone && (
                   <div className="flex flex-col gap-2">
                     {done.map((item) => (
-                      <ItemCard
-                        key={item.id}
-                        item={item}
-                        onCheck={toggleCheck}
-                        onEdit={openEdit}
-                        onDelete={deleteItem}
-                        onMoveUp={moveUp}
-                        onMoveDown={moveDown}
-                      />
+                      <div key={item.id} draggable onDragStart={(e) => onDragStart(e, item.id)} onDragOver={onDragOver} onDrop={(e) => onDropOn(e, item.id)}>
+                        <ItemCard
+                          item={item}
+                          onCheck={toggleCheck}
+                          onEdit={openEdit}
+                          onDelete={deleteItem}
+                          onMoveUp={moveUp}
+                          onMoveDown={moveDown}
+                          onToggleFrequent={async (id) => {
+                            // toggle times_purchased
+                            const it = items.find((x) => x.id === id)
+                            if (!it) return
+                            const newVal = (it.times_purchased ?? 0) > 0 ? 0 : 1
+                            await supabase.from('shopping_items').update({ times_purchased: newVal }).eq('id', id)
+                            setItems((prev) => prev.map((p) => p.id === id ? { ...p, times_purchased: newVal } : p))
+                          }}
+                        />
+                      </div>
                     ))}
                   </div>
                 )}
@@ -641,6 +697,7 @@ function ItemCard({
   onDelete,
   onMoveUp,
   onMoveDown,
+  onToggleFrequent?: (id: string) => void
 }: {
   item: ShoppingItem
   onCheck: (item: ShoppingItem) => void
@@ -648,6 +705,7 @@ function ItemCard({
   onDelete: (id: string) => void
   onMoveUp: (item: ShoppingItem) => void
   onMoveDown: (item: ShoppingItem) => void
+  onToggleFrequent?: (id: string) => void
 }) {
   const [anim, setAnim] = useState(false)
   const handleCheck = () => {
@@ -737,7 +795,7 @@ function ItemCard({
       </button>
 
       {/* Delete */}
-  <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2">
     <button
       onClick={() => onMoveUp(item)}
       className="p-1.5 rounded-lg active:opacity-60 flex-shrink-0"
@@ -753,6 +811,14 @@ function ItemCard({
       title="Переместить вниз"
     >
       ▼
+    </button>
+    <button
+      onClick={() => onToggleFrequent && onToggleFrequent(item.id)}
+      title={item.times_purchased && item.times_purchased > 0 ? 'Убрать из часто' : 'Добавить в часто'}
+      className="p-1.5 rounded-lg active:opacity-60 flex-shrink-0"
+      style={{ color: item.times_purchased && item.times_purchased > 0 ? 'gold' : 'var(--text-subtle)' }}
+    >
+      ★
     </button>
     <button
       onClick={() => onDelete(item.id)}

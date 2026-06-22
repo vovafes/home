@@ -9,6 +9,7 @@ import Toast from '@/components/Toast'
 import { createClient } from '@/lib/supabase/client'
 import { getFamilyId } from '@/lib/family'
 import type { Task, Profile } from '@/lib/types'
+import UIState from '@/components/UIState'
 
 const TASK_SELECT =
   '*, profiles:created_by(id,name,color,avatar_url), checker:completed_by(id,name,color,avatar_url), assignee:assigned_to(id,name,color,avatar_url)'
@@ -271,6 +272,20 @@ export default function TasksSection({ color }: { color?: string }) {
     } })
   }
 
+  // Update recurrence on a task
+  const updateRecurrence = async (id: string, val: string) => {
+    const prev = tasks.find((t) => t.id === id)
+    if (!prev) return
+    setTasks((s) => s.map((t) => t.id === id ? { ...t, recurrence: val || null } : t))
+    try {
+      await supabase.from('tasks').update({ recurrence: val || null }).eq('id', id)
+    } catch (e) {
+      // rollback
+      setTasks((s) => s.map((t) => t.id === id ? prev : t))
+      setToasts((s) => [...s, { id: String(Date.now()), message: 'Не удалось изменить повторение задачи' }])
+    }
+  }
+
   // Фильтр: «Все» → всё; участник → его задачи + общие (assigned_to = null)
   const matchesFilter = (t: Task) =>
     filter === 'all' || t.assigned_to === filter || t.assigned_to === null
@@ -299,9 +314,7 @@ export default function TasksSection({ color }: { color?: string }) {
 
       <main className="px-4 pt-4 pb-6 flex flex-col gap-4">
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 size={24} className="animate-spin" style={{ color: 'var(--text-muted)' }} />
-          </div>
+          <UIState type="loading" message="Загрузка задач…" />
         ) : (
           <>
             {/* Search + Фильтр по участникам + статус + дата */}
@@ -363,16 +376,14 @@ export default function TasksSection({ color }: { color?: string }) {
                   <VirtualGroup items={g.items} onToggle={toggleTask} onDelete={deleteTask} />
                 ) : (
                   g.items.map((task) => (
-                    <TaskCard key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />
+                    <TaskCard key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} onChangeRecurrence={(id, val) => updateRecurrence(id, val)} />
                   ))
                 )}
               </div>
             ))}
 
             {groups.length === 0 && active.length === 0 && done.length === 0 && (
-              <p className="text-center text-sm py-10" style={{ color: 'var(--text-muted)' }}>
-                {filter === 'all' ? 'Нет задач — добавь первую' : 'Здесь пока нет задач'}
-              </p>
+              <UIState type="empty" message={filter === 'all' ? 'Нет задач — добавь первую' : 'Здесь пока нет задач'} actionLabel="Добавить" onAction={openSheet} />
             )}
 
             {hasMore && (
@@ -402,7 +413,7 @@ export default function TasksSection({ color }: { color?: string }) {
                 {showDone && (
                   <div className="flex flex-col gap-2">
                     {done.map((task) => (
-                      <TaskCard key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />
+                                          <TaskCard key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} onChangeRecurrence={(id, val) => updateRecurrence(id, val)} />
                     ))}
                   </div>
                 )}
@@ -535,11 +546,12 @@ function FilterChip({
 }
 
 function TaskCard({
-  task, onToggle, onDelete,
+  task, onToggle, onDelete, onChangeRecurrence,
 }: {
   task: Task
   onToggle: (task: Task) => void
   onDelete: (id: string) => void
+  onChangeRecurrence?: (id: string, val: string) => void
 }) {
   const [anim, setAnim] = useState(false)
   const handleToggle = () => {
@@ -601,6 +613,14 @@ function TaskCard({
               <Users size={11} /> Всем
             </span>
           )}
+
+          {/* Recurrence control */}
+          <select value={task.recurrence ?? ''} onChange={(e) => onChangeRecurrence && onChangeRecurrence(task.id, e.target.value)}
+            className="text-xs rounded-full border px-2 py-1"
+            style={{ background: 'var(--surface-2)', color: 'var(--text-subtle)', borderColor: 'var(--border)' }}>
+            <option value="">Никогда</option>
+            <option value="weekly">Каждую неделю</option>
+          </select>
         </div>
       </div>
 
