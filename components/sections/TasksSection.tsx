@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react'
 import VirtualGroup from '@/components/VirtualGroup'
 import { Plus, X, Check, Trash2, ChevronDown, ChevronUp, Loader2, Users, CalendarDays } from 'lucide-react'
 import Header from '@/components/Header'
+import ConfirmModal from '@/components/ConfirmModal'
+import Toast from '@/components/Toast'
 import { createClient } from '@/lib/supabase/client'
 import { getFamilyId } from '@/lib/family'
 import type { Task, Profile } from '@/lib/types'
@@ -63,6 +65,12 @@ export default function TasksSection({ color }: { color?: string }) {
   const [saving, setSaving] = useState(false)
   const [page, setPage] = useState(0)
   const [hasMore, setHasMore] = useState(true)
+
+  // Confirm modal state
+  const [confirm, setConfirm] = useState<{ open: boolean; message: string; onConfirm?: () => void }>({ open: false, message: '' })
+  // Toasts
+  const [toasts, setToasts] = useState<any[]>([])
+
 
   const load = useCallback(async (pageNum = 0, opts?: { q?: string; status?: string; date?: string }) => {
     const from = pageNum * PAGE_SIZE
@@ -168,20 +176,20 @@ export default function TasksSection({ color }: { color?: string }) {
   const toggleTask = async (task: Task) => {
     const { data: { user } } = await supabase.auth.getUser()
     const nowDone = !task.completed
-    await supabase.from('tasks').update(
-      nowDone
-        ? { completed: true, completed_by: user?.id ?? null, completed_at: new Date().toISOString() }
-        : { completed: false, completed_by: null, completed_at: null }
-    ).eq('id', task.id)
-    setTasks((prev) =>
-      prev.map((t): Task =>
-        t.id === task.id
-          ? { ...t, completed: nowDone, completed_by: nowDone ? (user?.id ?? null) : null,
-              completed_at: nowDone ? new Date().toISOString() : null,
-              checker: nowDone ? (currentUser ?? undefined) : undefined }
-          : t
-      )
-    )
+    // optimistic update
+    setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, completed: nowDone, completed_by: nowDone ? (currentUser?.id ?? null) : null, completed_at: nowDone ? new Date().toISOString() : null, checker: nowDone ? (currentUser ?? undefined) : undefined } : t))
+    try {
+      await supabase.from('tasks').update(
+        nowDone
+          ? { completed: true, completed_by: user?.id ?? null, completed_at: new Date().toISOString() }
+          : { completed: false, completed_by: null, completed_at: null }
+      ).eq('id', task.id)
+    } catch (e) {
+      // rollback
+      setTasks((prev) => prev.map((t) => t.id === task.id ? task : t))
+      setToasts((s) => [...s, { id: String(Date.now()), message: 'Ошибка обновления статуса задачи', undoLabel: 'Повторить', onUndo: async () => toggleTask(task) }])
+      return
+    }
 
     // If task is recurring (weekly), create next occurrence
     if (nowDone && task.recurrence === 'weekly') {
@@ -209,16 +217,58 @@ export default function TasksSection({ color }: { color?: string }) {
   }
 
   const deleteTask = async (id: string) => {
-    if (!confirm('Удалить задачу? Это действие необратимо.')) return
-    await supabase.from('tasks').delete().eq('id', id)
-    setTasks((prev) => prev.filter((t) => t.id !== id))
+    const t = tasks.find((x) => x.id === id)
+    setConfirm({ open: true, message: 'Удалить задачу? Это действие необратимо.', onConfirm: async () => {
+      setConfirm({ open: false, message: '' })
+      // optimistic remove
+      setTasks((prev) => prev.filter((t2) => t2.id !== id))
+      try {
+        await supabase.from('tasks').delete().eq('id', id)
+        // show undo toast
+        const toastId = String(Date.now())
+        setToasts((s) => [...s, { id: toastId, message: 'Задача удалена', onUndo: async () => {
+          if (!t) return
+          const { data } = await supabase.from('tasks').insert({
+            id: t.id,
+            title: t.title,
+            description: t.description,
+            created_by: t.created_by,
+            assigned_to: t.assigned_to,
+            due_date: t.due_date,
+            recurrence: t.recurrence,
+            family_id: t.family_id,
+          }).select(TASK_SELECT).single()
+          if (data) setTasks((prev) => [data as Task, ...prev])
+        }, timeout: 5000 }])
+      } catch (e) {
+        // rollback
+        if (t) setTasks((prev) => [t, ...prev])
+        setToasts((s) => [...s, { id: String(Date.now()), message: 'Ошибка при удалении. Попробовать снова.' }])
+      }
+    } })
   }
 
   const clearDone = async () => {
-    if (!confirm('Удалить все выполненные задачи? Это действие необратимо.')) return
-    const ids = tasks.filter((t) => t.completed).map((t) => t.id)
-    await supabase.from('tasks').delete().in('id', ids)
-    setTasks((prev) => prev.filter((t) => !t.completed))
+    setConfirm({ open: true, message: 'Удалить все выполненные задачи? Это действие необратимо.', onConfirm: async () => {
+      setConfirm({ open: false, message: '' })
+      const removed = tasks.filter((t) => t.completed)
+      const ids = removed.map((t) => t.id)
+      setTasks((prev) => prev.filter((t) => !t.completed))
+      try {
+        await supabase.from('tasks').delete().in('id', ids)
+        const toastId = String(Date.now())
+        setToasts((s) => [...s, { id: toastId, message: 'Выполненные задачи удалены', undoLabel: 'Отменить', onUndo: async () => {
+          // restore all
+          if (!removed.length) return
+          const inserts = removed.map((r) => ({ title: r.title, description: r.description, created_by: r.created_by, assigned_to: r.assigned_to, due_date: r.due_date, recurrence: r.recurrence, family_id: r.family_id }))
+          const { data } = await supabase.from('tasks').insert(inserts).select(TASK_SELECT)
+          if (data) setTasks((prev) => [...(data as Task[]), ...prev])
+        }, timeout: 7000 }])
+      } catch (e) {
+        setTasks((prev) => [...prev, ...removed])
+        setToasts((s) => [...s, { id: String(Date.now()), message: 'Ошибка удаления выполненных задач' }])
+      }
+    } })
   }
 
   // Фильтр: «Все» → всё; участник → его задачи + общие (assigned_to = null)
@@ -239,6 +289,8 @@ export default function TasksSection({ color }: { color?: string }) {
 
   return (
     <>
+      <ConfirmModal open={confirm.open} message={confirm.message} onConfirm={() => confirm.onConfirm && confirm.onConfirm()} onCancel={() => setConfirm({ open: false, message: '' })} />
+      <Toast items={toasts} onRemove={(id: string) => setToasts((s) => s.filter((t) => t.id !== id))} />
       <Header
         title="Задачи"
         subtitle={active.length > 0 ? `${active.length} задач` : 'Всё готово'}

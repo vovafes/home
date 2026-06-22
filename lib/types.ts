@@ -60,6 +60,7 @@ export interface Task {
   profiles?: Profile
   checker?: Profile
   assignee?: Profile
+  family_id?: string | null
 }
 
 export interface CalendarEvent {

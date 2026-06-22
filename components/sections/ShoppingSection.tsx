@@ -7,6 +7,8 @@ import Header from '@/components/Header'
 import { createClient } from '@/lib/supabase/client'
 import { getFamilyId } from '@/lib/family'
 import type { Store } from '@/lib/types'
+import ConfirmModal from '@/components/ConfirmModal'
+import Toast from '@/components/Toast'
 
 const PRESET_COLORS = [
   '#4F46E5', '#DC2626', '#16A34A', '#D97706',
@@ -24,6 +26,10 @@ export default function ShoppingSection({ color }: { color?: string }) {
   const [newColor, setNewColor] = useState(PRESET_COLORS[0])
   const [saving, setSaving] = useState(false)
   const [itemCounts, setItemCounts] = useState<Record<string, number>>({})
+
+  const [confirm, setConfirm] = useState<{ open: boolean; message: string; onConfirm?: () => void }>({ open: false, message: '' })
+  const [toasts, setToasts] = useState<any[]>([])
+
 
   const supabase = createClient()
 
@@ -98,13 +104,28 @@ export default function ShoppingSection({ color }: { color?: string }) {
   const deleteStore = async (id: string, e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (!confirm('Удалить магазин и все связанные с ним данные?')) return
-    await supabase.from('stores').delete().eq('id', id)
-    setStores((s) => s.filter((st) => st.id !== id))
+    setConfirm({ open: true, message: 'Удалить магазин и все связанные с ним данные?', onConfirm: async () => {
+      setConfirm({ open: false, message: '' })
+      const st = stores.find((s) => s.id === id)
+      setStores((s) => s.filter((st2) => st2.id !== id))
+      try {
+        await supabase.from('stores').delete().eq('id', id)
+        setToasts((t) => [...t, { id: String(Date.now()), message: 'Магазин удалён', undoLabel: 'Отменить', onUndo: async () => {
+          if (!st) return
+          const { data } = await supabase.from('stores').insert({ name: st.name, icon: st.icon, color: st.color, order_index: st.order_index, created_by: st.created_by }).select().single()
+          if (data) setStores((prev) => [...prev, data])
+        }, timeout: 7000 }])
+      } catch (e) {
+        if (st) setStores((s) => [...s, st])
+        setToasts((t) => [...t, { id: String(Date.now()), message: 'Ошибка удаления магазина' }])
+      }
+    } })
   }
 
   return (
     <>
+      <ConfirmModal open={confirm.open} message={confirm.message} onConfirm={() => confirm.onConfirm && confirm.onConfirm()} onCancel={() => setConfirm({ open: false, message: '' })} />
+      <Toast items={toasts} onRemove={(id: string) => setToasts((s) => s.filter((t) => t.id !== id))} />
       <Header title="Покупки" subtitle="Выберите магазин" color={color} />
 
       <main className="px-4 pt-5 pb-6">

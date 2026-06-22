@@ -8,6 +8,8 @@ import {
 } from 'lucide-react'
 import Header from '@/components/Header'
 import VirtualList from '@/components/VirtualList'
+import ConfirmModal from '@/components/ConfirmModal'
+import Toast from '@/components/Toast'
 import { createClient } from '@/lib/supabase/client'
 import type { Store, ShoppingItem, Profile } from '@/lib/types'
 
@@ -53,6 +55,10 @@ export default function StorePage() {
   const [photoPreview, setPhotoPreview] = useState('')
   const [saving, setSaving] = useState(false)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
+
+  const [confirm, setConfirm] = useState<{ open: boolean; message: string; onConfirm?: () => void }>({ open: false, message: '' })
+  const [toasts, setToasts] = useState<any[]>([])
+
 
   const load = useCallback(async () => {
     let itemsQuery = supabase
@@ -202,33 +208,43 @@ export default function StorePage() {
     const { data: { user } } = await supabase.auth.getUser()
     const nowChecked = !item.checked
 
+    // optimistic update
+    setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, checked: nowChecked, checked_by: nowChecked ? (currentUser?.id ?? null) : null, checked_at: nowChecked ? new Date().toISOString() : null, checker: nowChecked ? (currentUser ?? undefined) : undefined, times_purchased: nowChecked ? ((i.times_purchased ?? 0) + 1) : i.times_purchased, last_purchased_at: nowChecked ? new Date().toISOString() : i.last_purchased_at } : i))
+
     const updatePayload = nowChecked
       ? { checked: true, checked_by: user?.id ?? null, checked_at: new Date().toISOString(), times_purchased: (item.times_purchased ?? 0) + 1, last_purchased_at: new Date().toISOString() }
       : { checked: false, checked_by: null, checked_at: null }
 
-    await supabase.from('shopping_items').update(updatePayload).eq('id', item.id)
-
-    setItems((prev) =>
-      prev.map((i): ShoppingItem =>
-        i.id === item.id
-          ? {
-              ...i,
-              checked: nowChecked,
-              checked_by: nowChecked ? (user?.id ?? null) : null,
-              checked_at: nowChecked ? new Date().toISOString() : null,
-              checker: nowChecked ? (currentUser ?? undefined) : undefined,
-              times_purchased: nowChecked ? ((i.times_purchased ?? 0) + 1) : i.times_purchased,
-              last_purchased_at: nowChecked ? new Date().toISOString() : i.last_purchased_at,
-            }
-          : i
-      )
-    )
+    try {
+      await supabase.from('shopping_items').update(updatePayload).eq('id', item.id)
+    } catch (e) {
+      // rollback
+      setItems((prev) => prev.map((i) => i.id === item.id ? item : i))
+      setToasts((s) => [...s, { id: String(Date.now()), message: 'Ошибка при отметке товара', undoLabel: 'Повторить', onUndo: async () => toggleCheck(item) }])
+    }
   }
 
   const deleteItem = async (id: string) => {
-    if (!confirm('Удалить товар? Это действие необратимо.')) return
-    await supabase.from('shopping_items').delete().eq('id', id)
-    setItems((prev) => prev.filter((i) => i.id !== id))
+    const t = items.find((i) => i.id === id)
+    setConfirm({ open: true, message: 'Удалить товар? Это действие необратимо.', onConfirm: async () => {
+      setConfirm({ open: false, message: '' })
+      setItems((prev) => prev.filter((i) => i.id !== id))
+      try {
+        await supabase.from('shopping_items').delete().eq('id', id)
+        // allow undo
+        const toastId = String(Date.now())
+        setToasts((s) => [...s, { id: toastId, message: 'Товар удалён', undoLabel: 'Отменить', onUndo: async () => {
+          if (!t) return
+          const { data } = await supabase.from('shopping_items').insert({
+            id: t.id, name: t.name, note: t.note, quantity: t.quantity, unit: t.unit, photo_url: t.photo_url, category: t.category, store_id: t.store_id, added_by: t.added_by, route_order: t.route_order
+          }).select('*, profiles:added_by(id,name,color,avatar_url), checker:checked_by(id,name,color,avatar_url)').single()
+          if (data) setItems((prev) => [data as ShoppingItem, ...prev])
+        }, timeout: 7000 }])
+      } catch (e) {
+        if (t) setItems((prev) => [t, ...prev])
+        setToasts((s) => [...s, { id: String(Date.now()), message: 'Ошибка при удалении товара' }])
+      }
+    } })
   }
 
   const moveUp = async (item: ShoppingItem) => {
@@ -267,10 +283,24 @@ export default function StorePage() {
   }
 
   const clearChecked = async () => {
-    if (!confirm('Удалить все купленные товары? Это действие необратимо.')) return
-    const ids = items.filter((i) => i.checked).map((i) => i.id)
-    await supabase.from('shopping_items').delete().in('id', ids)
-    setItems((prev) => prev.filter((i) => !i.checked))
+    setConfirm({ open: true, message: 'Удалить все купленные товары? Это действие необратимо.', onConfirm: async () => {
+      setConfirm({ open: false, message: '' })
+      const removed = items.filter((i) => i.checked)
+      const ids = removed.map((i) => i.id)
+      setItems((prev) => prev.filter((i) => !i.checked))
+      try {
+        await supabase.from('shopping_items').delete().in('id', ids)
+        setToasts((s) => [...s, { id: String(Date.now()), message: 'Купленные товары удалены', undoLabel: 'Отменить', onUndo: async () => {
+          if (!removed.length) return
+          const inserts = removed.map((r) => ({ name: r.name, note: r.note, quantity: r.quantity, unit: r.unit, photo_url: r.photo_url, category: r.category, store_id: r.store_id, added_by: r.added_by, route_order: r.route_order }))
+          const { data } = await supabase.from('shopping_items').insert(inserts).select('*, profiles:added_by(id,name,color,avatar_url), checker:checked_by(id,name,color,avatar_url)')
+          if (data) setItems((prev) => [...(data as ShoppingItem[]), ...prev])
+        }, timeout: 7000 }])
+      } catch (e) {
+        setItems((prev) => [...prev, ...removed])
+        setToasts((s) => [...s, { id: String(Date.now()), message: 'Ошибка удаления купленных товаров' }])
+      }
+    } })
   }
 
   const active = items.filter((i) => !i.checked)
@@ -598,6 +628,8 @@ export default function StorePage() {
           </div>
         </>
       )}
+      <ConfirmModal open={confirm.open} message={confirm.message} onConfirm={() => confirm.onConfirm && confirm.onConfirm()} onCancel={() => setConfirm({ open: false, message: '' })} />
+      <Toast items={toasts} onRemove={(id: string) => setToasts((s) => s.filter((t) => t.id !== id))} />
     </>
   )
 }

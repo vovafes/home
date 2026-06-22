@@ -6,6 +6,8 @@ import Header from '@/components/Header'
 import { createClient } from '@/lib/supabase/client'
 import { getFamilyId } from '@/lib/family'
 import type { CalendarEvent, Profile } from '@/lib/types'
+import ConfirmModal from '@/components/ConfirmModal'
+import Toast from '@/components/Toast'
 
 const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь',
                  'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь']
@@ -170,17 +172,35 @@ export default function CalendarSection({ color }: { color?: string }) {
     setSaving(false)
   }
 
+  const [confirm, setConfirm] = useState<{ open: boolean; message: string; onConfirm?: () => void }>({ open: false, message: '' })
+  const [toasts, setToasts] = useState<any[]>([])
+
   const deleteEvent = async (id: string) => {
-    if (!confirm('Удалить событие? Это действие необратимо.')) return
-    await supabase.from('calendar_events').delete().eq('id', id)
-    setEvents((prev) => prev.filter((e) => e.id !== id))
-    setShowSheet(false)
+    const ev = events.find((e) => e.id === id)
+    setConfirm({ open: true, message: 'Удалить событие? Это действие необратимо.', onConfirm: async () => {
+      setConfirm({ open: false, message: '' })
+      setEvents((prev) => prev.filter((e) => e.id !== id))
+      setShowSheet(false)
+      try {
+        await supabase.from('calendar_events').delete().eq('id', id)
+        setToasts((t) => [...t, { id: String(Date.now()), message: 'Событие удалено', undoLabel: 'Отменить', onUndo: async () => {
+          if (!ev) return
+          const { data } = await supabase.from('calendar_events').insert({ title: ev.title, description: ev.description, location: ev.location, start_date: ev.start_date, start_time: ev.start_time, end_time: ev.end_time, all_day: ev.all_day, color: ev.color, user_id: ev.user_id }).select('*, profiles:user_id(id,name,color,avatar_url)')
+          if (data) setEvents((prev) => [...(data as any), ...prev])
+        }, timeout: 7000 }])
+      } catch (e) {
+        if (ev) setEvents((prev) => [...prev, ev])
+        setToasts((t) => [...t, { id: String(Date.now()), message: 'Ошибка удаления события' }])
+      }
+    } })
   }
 
   const selectedEvents = events.filter((e) => e.start_date === dateStr(selected))
 
   return (
     <>
+      <ConfirmModal open={confirm.open} message={confirm.message} onConfirm={() => confirm.onConfirm && confirm.onConfirm()} onCancel={() => setConfirm({ open: false, message: '' })} />
+      <Toast items={toasts} onRemove={(id: string) => setToasts((s) => s.filter((t) => t.id !== id))} />
       <Header title="Календарь" subtitle={`${MONTHS[month]} ${year}`} color={color} />
 
       <main className="flex flex-col">
