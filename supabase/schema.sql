@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS public.families (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name        TEXT NOT NULL,
   invite_code TEXT UNIQUE NOT NULL DEFAULT upper(substring(md5(random()::text), 1, 6)),
+  invite_expires_at TIMESTAMPTZ, -- опциональная дата истечения инвайт-кода
+  invite_revoked BOOLEAN NOT NULL DEFAULT FALSE, -- можно отозвать код
+  invite_single_use BOOLEAN NOT NULL DEFAULT FALSE, -- одноразовый код
   created_by  UUID REFERENCES auth.users(id),
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );

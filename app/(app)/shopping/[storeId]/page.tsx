@@ -38,6 +38,8 @@ export default function StorePage() {
   const [loading, setLoading] = useState(true)
   const [showDone, setShowDone] = useState(false)
   const [currentUser, setCurrentUser] = useState<Profile | null>(null)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all'|'active'|'checked'>('all')
 
   // Sheet state
   const [showSheet, setShowSheet] = useState(false)
@@ -51,13 +53,22 @@ export default function StorePage() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
 
   const load = useCallback(async () => {
+    let itemsQuery = supabase
+      .from('shopping_items')
+      .select('*, profiles:added_by(id,name,color,avatar_url), checker:checked_by(id,name,color,avatar_url)')
+      .eq('store_id', storeId)
+      .order('created_at', { ascending: false })
+
+    if (search) {
+      const q = search.replace(/%/g, '\\%')
+      itemsQuery = itemsQuery.or(`name.ilike.%${q}%,note.ilike.%${q}%`)
+    }
+    if (statusFilter === 'active') itemsQuery = itemsQuery.eq('checked', false)
+    if (statusFilter === 'checked') itemsQuery = itemsQuery.eq('checked', true)
+
     const [storeRes, itemsRes, userRes] = await Promise.all([
       supabase.from('stores').select('*').eq('id', storeId).single(),
-      supabase
-        .from('shopping_items')
-        .select('*, profiles:added_by(id,name,color,avatar_url), checker:checked_by(id,name,color,avatar_url)')
-        .eq('store_id', storeId)
-        .order('created_at', { ascending: false }),
+      itemsQuery,
       supabase.auth.getUser(),
     ])
 
@@ -89,7 +100,7 @@ export default function StorePage() {
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [storeId, load])
+  }, [storeId, load, search, statusFilter])
 
   const openAdd = () => {
     setEditItem(null)
@@ -248,16 +259,20 @@ export default function StorePage() {
 
             {/* Sort / grouping */}
             <div className="flex items-center gap-2 mt-2">
-              <label className="text-xs text-[var(--text-muted)]">Сортировка:</label>
-              <select
-                value={''}
-                onChange={() => { /* placeholder for future */ }}
-                className="text-sm rounded-xl border px-2 py-1"
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); }}
+                placeholder="Поиск по списку"
+                className="flex-1 rounded-xl border px-3 py-2 text-sm outline-none"
                 style={{ background: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' }}
-              >
-                <option value="default">По умолчанию</option>
-                <option value="category">По категории</option>
-                <option value="name">По имени (по маршруту)</option>
+              />
+              <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value as any) }}
+                className="rounded-xl border px-2 py-2 text-sm"
+                style={{ background: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' }}>
+                <option value="all">Все</option>
+                <option value="active">Нужно купить</option>
+                <option value="checked">Куплено</option>
               </select>
             </div>
 

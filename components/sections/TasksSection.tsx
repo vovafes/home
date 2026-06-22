@@ -45,29 +45,52 @@ export default function TasksSection({ color }: { color?: string }) {
   const supabase = createClient()
   const accent = color ?? 'var(--primary)'
 
+  const PAGE_SIZE = 30
   const [tasks, setTasks] = useState<Task[]>([])
   const [members, setMembers] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
   const [showDone, setShowDone] = useState(false)
   const [currentUser, setCurrentUser] = useState<Profile | null>(null)
   const [filter, setFilter] = useState<string>('all') // 'all' | profileId
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all'|'active'|'done'>('all')
   const [showSheet, setShowSheet] = useState(false)
   const [form, setForm] = useState<{ title: string; description: string; assignedTo: string | null; dueDate: string }>({
     title: '', description: '', assignedTo: null, dueDate: '',
   })
   const [saving, setSaving] = useState(false)
+  const [page, setPage] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
 
-  const load = useCallback(async () => {
-    const { data } = await supabase
+  const load = useCallback(async (pageNum = 0, opts?: { q?: string; status?: string }) => {
+    const from = pageNum * PAGE_SIZE
+    const to = from + PAGE_SIZE - 1
+    let query = supabase
       .from('tasks')
       .select(TASK_SELECT)
       .order('created_at', { ascending: false })
-    if (data) setTasks(data as Task[])
+
+    if (opts?.q) {
+      const q = opts.q.replace(/%/g, '\\%')
+      query = query.or(`title.ilike.%${q}%,description.ilike.%${q}%`)
+    }
+    if (opts?.status === 'active') query = query.eq('completed', false)
+    if (opts?.status === 'done') query = query.eq('completed', true)
+
+    const { data } = await query.range(from, to)
+    if (data) {
+      if (pageNum === 0) setTasks(data as Task[])
+      else setTasks((prev) => [...prev, ...(data as Task[])])
+      setHasMore((data as Task[]).length === PAGE_SIZE)
+    } else {
+      setHasMore(false)
+    }
     setLoading(false)
   }, [])
 
   useEffect(() => {
-    load()
+    // initial load
+    load(0, { q: search, status: statusFilter })
     supabase.from('profiles').select('*').order('created_at').then(({ data }) => {
       if (data) setMembers(data as Profile[])
     })
@@ -79,10 +102,16 @@ export default function TasksSection({ color }: { color?: string }) {
     })
     const channel = supabase
       .channel('tasks')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => { setPage(0); load(0, { q: search, status: statusFilter }) })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [load])
+  }, [load, search, statusFilter])
+
+  const loadMore = () => {
+    const next = page + 1
+    setPage(next)
+    load(next, { q: search, status: statusFilter })
+  }
 
   const openSheet = () => {
     setForm({ title: '', description: '', assignedTo: filter === 'all' ? null : filter, dueDate: '' })
@@ -175,7 +204,25 @@ export default function TasksSection({ color }: { color?: string }) {
           </div>
         ) : (
           <>
-            {/* Фильтр по участникам */}
+            {/* Search + Фильтр по участникам + статус */}
+            <div className="flex gap-2 items-center">
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+                placeholder="Поиск задач"
+                className="flex-1 rounded-xl border px-3 py-2 text-sm outline-none"
+                style={{ background: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' }}
+              />
+              <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value as any); setPage(0); }}
+                className="rounded-xl border px-2 py-2 text-sm"
+                style={{ background: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' }}>
+                <option value="all">Все</option>
+                <option value="active">Нужно сделать</option>
+                <option value="done">Выполнено</option>
+              </select>
+            </div>
+
             <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-1 px-1 pb-0.5">
               <FilterChip active={filter === 'all'} accent={accent} onClick={() => setFilter('all')}>
                 <Users size={13} /> Все
@@ -187,7 +234,6 @@ export default function TasksSection({ color }: { color?: string }) {
                 </FilterChip>
               ))}
             </div>
-
             <button
               onClick={openSheet}
               className="flex items-center gap-3 rounded-2xl border-2 border-dashed px-4 py-3.5 w-full transition-all active:scale-[0.98]"
@@ -209,10 +255,18 @@ export default function TasksSection({ color }: { color?: string }) {
               </div>
             ))}
 
-            {active.length === 0 && done.length === 0 && (
+            {groups.length === 0 && active.length === 0 && done.length === 0 && (
               <p className="text-center text-sm py-10" style={{ color: 'var(--text-muted)' }}>
                 {filter === 'all' ? 'Нет задач — добавь первую' : 'Здесь пока нет задач'}
               </p>
+            )}
+
+            {hasMore && (
+              <div className="mt-3 flex justify-center">
+                <button onClick={loadMore} className="rounded-xl px-4 py-2 border" style={{ borderColor: 'var(--border)' }}>
+                  Загрузить ещё
+                </button>
+              </div>
             )}
 
             {done.length > 0 && (

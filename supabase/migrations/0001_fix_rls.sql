@@ -48,9 +48,20 @@ BEGIN
   IF v_family.id IS NULL THEN
     RAISE EXCEPTION 'not_found';
   END IF;
+  -- Проверки: не отозван, не просрочен
+  IF v_family.invite_revoked THEN
+    RAISE EXCEPTION 'invite_revoked';
+  END IF;
+  IF v_family.invite_expires_at IS NOT NULL AND v_family.invite_expires_at < now() THEN
+    RAISE EXCEPTION 'invite_expired';
+  END IF;
   INSERT INTO public.family_members (family_id, user_id)
   VALUES (v_family.id, auth.uid())
   ON CONFLICT DO NOTHING;
+  -- Если одноразовый код — отозвать после успешного присоединения
+  IF v_family.invite_single_use THEN
+    UPDATE public.families SET invite_revoked = TRUE WHERE id = v_family.id;
+  END IF;
   RETURN v_family;
 END;
 $$;
