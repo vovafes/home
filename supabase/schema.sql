@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS public.tasks (
 ALTER TABLE public.stores          ADD COLUMN IF NOT EXISTS family_id UUID REFERENCES public.families(id);
 ALTER TABLE public.tasks           ADD COLUMN IF NOT EXISTS family_id UUID REFERENCES public.families(id);
 ALTER TABLE public.calendar_events ADD COLUMN IF NOT EXISTS family_id UUID REFERENCES public.families(id);
+ALTER TABLE public.shopping_items  ADD COLUMN IF NOT EXISTS category TEXT; -- Категория товара (например: молочное, овощи)
 
 -- Назначение задачи участнику (NULL = всем) и срок
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS assigned_to UUID;

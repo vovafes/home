@@ -43,7 +43,7 @@ export default function StorePage() {
   const [showSheet, setShowSheet] = useState(false)
   const [editItem, setEditItem] = useState<ShoppingItem | null>(null)
   const [form, setForm] = useState({
-    name: '', note: '', quantity: '', unit: 'шт', photo_url: '',
+    name: '', note: '', quantity: '', unit: 'шт', photo_url: '', category: ''
   })
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState('')
@@ -93,7 +93,7 @@ export default function StorePage() {
 
   const openAdd = () => {
     setEditItem(null)
-    setForm({ name: '', note: '', quantity: '', unit: 'шт', photo_url: '' })
+    setForm({ name: '', note: '', quantity: '', unit: 'шт', photo_url: '', category: '' })
     setPhotoFile(null)
     setPhotoPreview('')
     setShowSheet(true)
@@ -107,6 +107,7 @@ export default function StorePage() {
       quantity: item.quantity?.toString() ?? '',
       unit: item.unit ?? 'шт',
       photo_url: item.photo_url ?? '',
+      category: item.category ?? ''
     })
     setPhotoFile(null)
     setPhotoPreview(item.photo_url ?? '')
@@ -148,6 +149,7 @@ export default function StorePage() {
       quantity: form.quantity ? Number(form.quantity) : null,
       unit: form.quantity ? form.unit : null,
       photo_url: photoUrl || null,
+      category: form.category?.trim() || null,
     }
 
     if (editItem) {
@@ -244,22 +246,55 @@ export default function StorePage() {
               <span className="text-sm font-medium">Добавить товар</span>
             </button>
 
-            {/* Active items */}
+            {/* Sort / grouping */}
+            <div className="flex items-center gap-2 mt-2">
+              <label className="text-xs text-[var(--text-muted)]">Сортировка:</label>
+              <select
+                value={''}
+                onChange={() => { /* placeholder for future */ }}
+                className="text-sm rounded-xl border px-2 py-1"
+                style={{ background: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' }}
+              >
+                <option value="default">По умолчанию</option>
+                <option value="category">По категории</option>
+                <option value="name">По имени (по маршруту)</option>
+              </select>
+            </div>
+
+            {/* Active items grouped by category */}
             {active.length > 0 && (
               <div>
                 <p className="text-xs font-semibold uppercase tracking-widest mb-2 px-1" style={{ color: 'var(--text-muted)' }}>
                   Купить · {active.length}
                 </p>
-                <div className="flex flex-col gap-2">
-                  {active.map((item) => (
-                    <ItemCard
-                      key={item.id}
-                      item={item}
-                      onCheck={toggleCheck}
-                      onEdit={openEdit}
-                      onDelete={deleteItem}
-                    />
-                  ))}
+                <div className="flex flex-col gap-4">
+                  {(() => {
+                    const groups: Record<string, ShoppingItem[]> = {}
+                    active.forEach((it) => {
+                      const k = it.category?.trim() || 'Без категории'
+                      if (!groups[k]) groups[k] = []
+                      groups[k].push(it)
+                    })
+                    const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b))
+                    return keys.map((k) => (
+                      <div key={k} className="flex flex-col gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-widest px-1" style={{ color: 'var(--text-muted)' }}>
+                          {k} · {groups[k].length}
+                        </p>
+                        <div className="flex flex-col gap-2">
+                          {groups[k].map((item) => (
+                            <ItemCard
+                              key={item.id}
+                              item={item}
+                              onCheck={toggleCheck}
+                              onEdit={openEdit}
+                              onDelete={deleteItem}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  })()}
                 </div>
               </div>
             )}
@@ -389,6 +424,16 @@ export default function StorePage() {
                 style={{ background: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' }}
               />
 
+              {/* Category */}
+              <input
+                type="text"
+                value={form.category}
+                onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+                placeholder="Категория (например: молочное, овощи)"
+                className="w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                style={{ background: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' }}
+              />
+
               {/* Quantity + unit */}
               <div className="flex gap-2">
                 <input
@@ -482,6 +527,11 @@ function ItemCard({
               <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>
                 {item.note}
               </p>
+            )}
+            {item.category && (
+              <span className="inline-block text-[11px] mt-1 px-2 py-0.5 rounded-full" style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+                {item.category}
+              </span>
             )}
           </div>
           {item.photo_url && (

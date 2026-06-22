@@ -37,6 +37,7 @@ export interface ShoppingItem {
   checked_at: string | null
   added_by: string
   created_at: string
+  category?: string | null
   profiles?: Profile
   checker?: Profile
 }
