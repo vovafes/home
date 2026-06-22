@@ -697,7 +697,7 @@ function ItemCard({
   onDelete,
   onMoveUp,
   onMoveDown,
-  onToggleFrequent?: (id: string) => void
+  onToggleFrequent,
 }: {
   item: ShoppingItem
   onCheck: (item: ShoppingItem) => void
