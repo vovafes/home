@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Camera, Loader2, Check, LogOut, User, Moon, Sun, Copy, CheckCheck } from 'lucide-react'
+import { Camera, Loader2, Check, LogOut, User, Moon, Sun, Copy, CheckCheck, DoorOpen } from 'lucide-react'
 import Header from '@/components/Header'
+import ConfirmModal from '@/components/ConfirmModal'
 import { createClient } from '@/lib/supabase/client'
 import type { Profile, Family } from '@/lib/types'
 
@@ -35,6 +36,8 @@ export default function ProfileSection({ color }: { color?: string }) {
   const [family, setFamily] = useState<Family | null>(null)
   const [copied, setCopied] = useState(false)
   const [dark, setDark] = useState(false)
+  const [confirmLeave, setConfirmLeave] = useState(false)
+  const [leaving, setLeaving] = useState(false)
 
   useEffect(() => {
     const stored = localStorage.getItem('dom-dark')
@@ -118,6 +121,16 @@ export default function ProfileSection({ color }: { color?: string }) {
     router.refresh()
   }
 
+  const leaveFamily = async () => {
+    setLeaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setLeaving(false); return }
+    await supabase.from('family_members').delete().eq('user_id', user.id)
+    setConfirmLeave(false)
+    router.push('/setup')
+    router.refresh()
+  }
+
   if (loading) {
     return (
       <>
@@ -131,6 +144,14 @@ export default function ProfileSection({ color }: { color?: string }) {
 
   return (
     <>
+      <ConfirmModal
+        open={confirmLeave}
+        title="Покинуть семью"
+        message={leaving ? 'Выходим из семьи…' : 'Покинуть эту семью? Вы потеряете доступ к её спискам, задачам и календарю. Вернуться можно по коду приглашения.'}
+        confirmLabel="Покинуть"
+        onConfirm={leaveFamily}
+        onCancel={() => setConfirmLeave(false)}
+      />
       <Header
         title="Профиль"
         color={color}
@@ -242,6 +263,14 @@ export default function ProfileSection({ color }: { color?: string }) {
             <p className="text-xs" style={{ color: 'var(--text-subtle)' }}>
               Поделитесь этим кодом с членами семьи
             </p>
+            <button
+              onClick={() => setConfirmLeave(true)}
+              className="flex items-center justify-center gap-2 rounded-xl py-2.5 mt-1 text-sm font-medium transition-all active:scale-95 border"
+              style={{ background: 'var(--surface-2)', color: 'var(--danger)', borderColor: 'var(--border)' }}
+            >
+              <DoorOpen size={15} />
+              Покинуть семью
+            </button>
           </div>
         )}
 

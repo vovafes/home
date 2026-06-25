@@ -166,6 +166,38 @@ CREATE POLICY "Вступить в семью" ON public.family_members FOR INSE
 CREATE POLICY "Покинуть семью" ON public.family_members FOR DELETE
   USING (user_id = auth.uid());
 
+-- Присоединение по коду приглашения.
+-- SECURITY DEFINER обходит RLS на families, чтобы новый участник (ещё не член семьи)
+-- мог найти семью по коду. Иначе политика "Видеть свою семью" скрывает её и
+-- пользователь получает «семья не найдена». Заодно переносит пользователя из
+-- прежней семьи (одно членство на пользователя).
+CREATE OR REPLACE FUNCTION public.join_family_by_code(p_code TEXT)
+RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  fid UUID;
+  uid UUID := auth.uid();
+BEGIN
+  IF uid IS NULL THEN
+    RAISE EXCEPTION 'not_authenticated';
+  END IF;
+  SELECT id INTO fid FROM public.families
+    WHERE invite_code = upper(trim(p_code))
+      AND invite_revoked = FALSE
+      AND (invite_expires_at IS NULL OR invite_expires_at > now())
+    LIMIT 1;
+  IF fid IS NULL THEN
+    RAISE EXCEPTION 'family_not_found';
+  END IF;
+  -- одно членство на пользователя: убираем прежнее, добавляем новое
+  DELETE FROM public.family_members WHERE user_id = uid;
+  INSERT INTO public.family_members (family_id, user_id)
+    VALUES (fid, uid)
+    ON CONFLICT (family_id, user_id) DO NOTHING;
+  RETURN fid;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.join_family_by_code(TEXT) TO authenticated;
+
 -- Profiles
 CREATE POLICY "Видеть профили своей семьи" ON public.profiles FOR SELECT
   USING (

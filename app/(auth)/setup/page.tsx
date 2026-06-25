@@ -52,24 +52,14 @@ export default function SetupPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    const { data: family } = await supabase
-      .from('families')
-      .select('id')
-      .eq('invite_code', code)
-      .single()
-
-    if (!family) {
-      setError('Семья с таким кодом не найдена')
-      setLoading(false)
-      return
-    }
-
-    const { error: joinErr } = await supabase
-      .from('family_members')
-      .insert({ family_id: family.id, user_id: user.id })
+    const { error: joinErr } = await supabase.rpc('join_family_by_code', { p_code: code })
 
     if (joinErr) {
-      setError('Не удалось вступить в семью')
+      setError(
+        joinErr.message?.includes('family_not_found')
+          ? 'Семья с таким кодом не найдена'
+          : 'Не удалось вступить в семью'
+      )
       setLoading(false)
       return
     }

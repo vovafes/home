@@ -15,7 +15,7 @@ const WEEKDAYS = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс']
 
 const EVENT_COLORS = [
   '#4F46E5','#DC2626','#16A34A','#D97706',
-  '#0284C7','#9333EA','#DB2777','#0F766E',
+  '#EAB308','#0284C7','#9333EA','#DB2777','#0F766E',
 ]
 
 function isSameDay(a: Date, b: Date) {

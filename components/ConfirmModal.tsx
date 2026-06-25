@@ -2,10 +2,11 @@
 
 import React from 'react'
 
-export default function ConfirmModal({ open, title, message, onConfirm, onCancel }: {
+export default function ConfirmModal({ open, title, message, confirmLabel, onConfirm, onCancel }: {
   open: boolean
   title?: string
   message: string
+  confirmLabel?: string
   onConfirm: () => void
   onCancel: () => void
 }) {
@@ -18,7 +19,7 @@ export default function ConfirmModal({ open, title, message, onConfirm, onCancel
         <p className="text-sm mt-2" style={{ color: 'var(--text-muted)' }}>{message}</p>
         <div className="flex gap-2 justify-end mt-4">
           <button onClick={onCancel} className="rounded-xl px-4 py-2 border" style={{ borderColor: 'var(--border)' }}>Отмена</button>
-          <button onClick={onConfirm} className="rounded-xl px-4 py-2 bg-var" style={{ background: 'var(--danger)', color: '#fff' }}>Удалить</button>
+          <button onClick={onConfirm} className="rounded-xl px-4 py-2 bg-var" style={{ background: 'var(--danger)', color: '#fff' }}>{confirmLabel ?? 'Удалить'}</button>
         </div>
       </div>
     </div>
